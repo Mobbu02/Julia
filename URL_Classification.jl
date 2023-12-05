@@ -1,34 +1,26 @@
 using CSV, DataFrames, Flux, Mill, URIs, Cthulhu, ProfileView
 
-## TODO: Prelalocate sizes of dictionaries!
-# Dictionary for storage of part of URLS
-dict = Dict{String,Vector{Vector{String}}}()
-dict["fragment"] = []
-dict["query"] = []
-dict["path"] = []
-
-dict_hashed = Dict{String,Vector{Vector{Vector{UInt64}}}}()
-dict_hashed["fragment"] = []
-dict_hashed["query"] = []
-dict_hashed["path"] = []
-
-
-bag_indx_parts = Dict{String, Vector{Int64}}()
-bag_indx_parts["fragment"] = []
-bag_indx_parts["query"] = []
-bag_indx_parts["path"] = []
-
-
-
-
+parts_of_url = ["fragment", "query", "path"]
 function main()
-    ## TODO: Prelalocate sizes of dictionaries!
-    # Dictionary for storage of part of URLS
+
+    # Read lines
+    lines = readlines("mixed_lines.txt") # TODO: Read only 20% of lines 
+    size_to_alloc = size(lines)[1] # Amount of lines loaded
+    print(lines[1])
+    ## TODO: Prelalocate sizes 
+    # Dictionary for storage of part of URLS (Remainder: dictionaries automatically resize) 
     dict = Dict{String,Vector{Vector{String}}}()
     dict["fragment"] = []
     dict["query"] = []
     dict["path"] = []
 
+    # Prealocating size for the Vector of Vectors of Strings
+    for key in parts_of_url
+        dict[key] = Vector{Vector{String}}(undef, size_to_alloc)
+    end
+
+
+    # TODO: Prealocate size for the rest
     dict_hashed = Dict{String,Vector{Vector{Vector{UInt64}}}}()
     dict_hashed["fragment"] = []
     dict_hashed["query"] = []
@@ -39,12 +31,14 @@ function main()
     bag_indx_parts["fragment"] = []
     bag_indx_parts["query"] = []
     bag_indx_parts["path"] = []
-
 end
 
 
+main()
 
 
+
+# TODO: Remove pushes
 # Add url to dict and add lengths of part of the url to the bag_indx_parts
 function add_url_to_dict(x::URI, dict::Dict{String, Vector{Vector{String}}}, indx::Dict{String, Vector{Int64}})
     path = string.(URIs.splitpath(x.path))
@@ -86,9 +80,11 @@ function map_to_vec(x::Vector{UInt64})
 end
 
 # Fill dict with URL parts and fill bag_indx_parts with lenghts of parts of url
-function fill_dict(D::Dict{String, Vector{Vector{String}}}, E::Dict{String, Vector{Int}}, file::String)
-    lines = readlines(file)
-    i = 0
+function fill_dict(D::Dict{String, Vector{Vector{String}}}, E::Dict{String, Vector{Int}}, lines::Vector{String})
+    
+
+
+
     for line in lines
         add_url_to_dict(URI(line), D, E)
         i += 1
@@ -97,9 +93,6 @@ function fill_dict(D::Dict{String, Vector{Vector{String}}}, E::Dict{String, Vect
         end
     end
 end
-
-#descend(fill_dict, Tuple{})
-#@descend fill_dict(dict, bag_indx_parts,"mixed_lines.txt")
 
 #ProfileView.@profview fill_dict(dict, bag_indx_parts,"mixed_lines.txt")
 #fill_dict(dict, bag_indx_parts,"mixed_lines.txt")
