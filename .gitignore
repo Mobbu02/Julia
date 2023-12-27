@@ -7,3 +7,7 @@
 /test.jl
 /Test_code
 /URL_Classification.ipynb
+/bag_indx_parts.jld2
+/dict_hashed.jld2
+/dict.jld2
+/histogram_dict.jld2
