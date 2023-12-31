@@ -10,7 +10,7 @@ function main()
     dict = Dict{String,Vector{Vector{String}}}()
     dict["query"] = []
     dict["path"] = []
-
+    
     # Fill dict values with vector of vectors of strings
     for key in parts_of_url
         dict[key] = Vector{Vector{String}}(undef, size_to_alloc) 
@@ -21,61 +21,53 @@ function main()
     dict_hashed = Dict{String,Vector{Vector{Vector{UInt64}}}}()
     dict_hashed["query"] = []
     dict_hashed["path"] = []
-
+    
     # Fill dict_hashed with vector of vector of vectors of strings
     for key in parts_of_url
         dict_hashed[key] = Vector{Vector{String}}(undef, size_to_alloc) 
     end
-
+    
     # Dictionary for storing the lenghts of parts of URLs
     bag_indx_parts = Dict{String, Vector{Int64}}()
     bag_indx_parts["query"] = []
     bag_indx_parts["path"] = []
-     
+    
     fill_dict(dict, bag_indx_parts, lines)      # Fill dictionary 
     #ProfileView.@profview fill_dict(dict, bag_indx_parts, lines)
     #descend(fill_dict,Tuple{Dict{String, Vector{Vector{String}}}, Dict{String, Vector{Int64}}, Vector{String}})
     #@descend fill_dict(dict, bag_indx_parts, lines)
-
-
     
     for key in parts_of_url         # For every key
         for i=1:length(dict[key])       # For every vector in that value vector
             dict_hashed[key][i] = transform_to_trig(dict[key][i])       # Transform vector in a 
         end
     end
-
+    
     # Dictionary of histogram vectors
     histogram_dict = Dict{String, Vector{Vector{Vector{Int64}}}}()
     histogram_dict["query"] = []
     histogram_dict["path"] = []
-
+    
     # Preallocate
     for key in parts_of_url
         histogram_dict[key] = Vector{Vector{Int64}}(undef, size_to_alloc) 
     end
-
-
+    
     for key in parts_of_url
         for i=1:length(histogram_dict[key])
             histogram_dict[key][i] = hashed_to_hist(dict_hashed[key][i])
         end
-    end
-    println(dict_hashed["path"][1][1])
-    println(histogram_dict["path"][1][1])
+    end   
+    bag_path = create_bags(histogram_dict["path"], "path", bag_indx_parts)
+    bag_query = create_bags(histogram_dict["query"], "query", bag_indx_parts)
 
-    # dict_path = "dict.jld2"
-    #  @save dict_path dict
+    bag_path_index = create_range(bag_indx_parts["path"])
+    bag_query_index = create_range(bag_indx_parts["query"])
 
-    # bag_indx_parts_path = "bag_indx_parts.jld2"
-    # @save bag_indx_parts_path bag_ind_of_bag
+    
+    train(bag_path, bag_query, bag_path_index, bag_query_index)
 
-    # histogram_dict_path = "histogram_dict.jld2"
-    # @save histogram_dict_path histogram_dict
-
-     dict_hashed_path = "dict_hashed.jld2"
-     @save dict_hashed_path dict_hashed
-    # print("\n a")
+   
 
 end
 
@@ -132,30 +124,26 @@ function hashed_to_hist(x::Vector{Vector{UInt64}})
     vec_to_ret = Vector{Vector{Int64}}(undef, length(x)) # Initialize the vector to return
     
     map!( y->begin # Vector{UInt64}         # Creating trigrams and mapping them into another vector
-        mapping_vec = Vector{Int64}(undef, 2053)  # TODO: Zeros  
+        mapping_vec = zeros(Int64, 2053)  
         map(val-> val != 0 && place_numb(mapping_vec, val), y)       # Place numbers onto their corresponding placei in the new vector
         return mapping_vec
     end, vec_to_ret, x)
     return vec_to_ret
 end
 
-
-
-main()
-
-
-
-function count_size(key::String)
-    return sum(bag_indx_parts[key])
+function count_size(key::String, B::Dict{String, Vector{Int64}})
+    return sum(B[key])
 end
 
-function create_bags(D::Vector{Vector{Vector{UInt64}}}, key::String)
-    matrix_to_return = Matrix{UInt64}(undef, 2053, count_size(key)) #TOREVISE
+# Create bags(Array Node) - matrix of vectors
+function create_bags(D::Vector{Vector{Vector{Int64}}}, key::String, B::Dict{String, Vector{Int64}})
+    matrix_to_return = Matrix{UInt64}(undef, 2053, count_size(key, B)) 
+    # Assigning vectors to columns of matrix_to_return
     for i=1:length(D)
-        for j=1:length(D[i])
-            for vec in D[i]
-                matrix_to_return = hcat(matrix_to_return,vec)
-            end
+        column_indx = 1
+        for vec in D[i]
+            matrix_to_return[:,column_indx] .= vec
+            column_indx += 1
         end
     end
     return matrix_to_return
@@ -163,36 +151,47 @@ end
 
 # Create a non-overlapping vector of ranges
 function create_range(x::Vector{Int64}) 
-    vector_to_ret = Vector{UnitRange{Int64}}()
+    numb_of_ranges = count(x->x>0, x) # Count the amount non zero numbers
+    y = filter(numb-> numb!=0,x) # Only non zero values
+    vector_to_ret = Vector{UnitRange{Int64}}(undef, numb_of_ranges) # Create a vector of numb_of_ranges size
     start = 1
-    for i=1:length(x)
-        push!(vector_to_ret, start:start+x[i]-1)
-        start +=x[i]
-    end
+    # Map ranges into a vector_to_ret
+    map!(numb-> begin 
+         to_ret = start:(start+numb-1) 
+         start+=numb
+         return to_ret
+         end,vector_to_ret,y)
     return vector_to_ret
 end
 
-#bag_path = create_bags(dict_hashed["path"], "path")
-#bag_query = create_bags(dict_hashed["query"], "query")
-#bag_fragment = create_bags(dict_hashed["fragment"], "fragment")
 
-#bag_path_index = create_range(bag_indx_parts["path"])
-#bag_query_index = create_range(bag_indx_parts["query"])
-#bag_fragment_index = create_range(bag_indx_parts["fragment"])
+function train(bag_path::Matrix{UInt64}, bag_query::Matrix{UInt64}, bag_path_index::Vector{UnitRange{Int64}}, bag_query_index::Vector{UnitRange{Int64}})
+     # Structure of Node
+     ds = BagNode(ProductNode((BagNode(bag_path,
+                                        bag_path_index),
+                                BagNode(bag_query, 
+                                bag_query_index))), # Won't work, because I deleted 0s 
+                    [1:1, 2:2])
 
-# Vector of how many parts is the URL consisting of 
-# ??
-function bag_ind_of_bag()
-    vec_to_ret = Vector{Int64}()
-    for i=1:length(bag_indx_parts["path"])
-        if bag_indx_parts["path"][i] !=0 && bag_indx_parts["query"][i] !=0
-            push!(vec_to_ret, 2)
-        else
-            push!(vec_to_ret, 1)
+    #printtree(ds)
+
+    # Model through reflection model 
+    model = reflectinmodel(ds, d->Dense(d,8), SegmentedMeanMax)
+    #printtree(model)
+
+    model(ds)
+
+    opt_state = Flux.setup(Adam(), model)
+
+
+    loss(m, x, y) = Flux.logitcrossentropy(m(x), y)
+
+    for e in 1:100
+        if e % 10 == 1
+            @info "Epoch $e" training_loss=loss(model, ds, y_oh)
         end
+        Flux.train!(loss, model, [(ds, y_oh)], opt_state)
     end
-    return vec_to_ret
 end
-
-# Waste?
-#bag_bag_indx = create_range(bag_ind_of_bag()
+   
+main()
