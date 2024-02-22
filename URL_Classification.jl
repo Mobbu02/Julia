@@ -1,16 +1,21 @@
-using CSV, DataFrames, Flux, Mill, URIs, Cthulhu, ProfileView, BenchmarkTools, JLD2, Shuffle, OneHotArrays
+using CSV, DataFrames, Flux, Mill, URIs, Cthulhu, ProfileView, BenchmarkTools, JLD2, OneHotArrays, Random
+
+
+include("dictionary_handling.jl")
+using .dictionary_handling
 
 parts_of_url = ["query", "path"]
 function main(prime::Int64, neurons::Int64)
     # Read lines
-    all_lines = readlines("mixed_lines.txt") 
-    #shuffle(collect(1:round(Int64, 1/5*length(all_lines))))
-    new_order_of_lines = collect(1:round(Int64, 1/5*length(all_lines)))         # Collect all indicies and shuffle them
+    all_lines = load("mixed_lines.jld2", "mixed_lines")       #  Read URL addresses
+    all_labels = load("labels.jld2", "labels")      # Load labels for instances
+    
+    new_indexes = randcycle(MersenneTwister(), length(all_lines))        # Generate permutation of set length
+    
 
-    lines = all_lines[new_order_of_lines]           # Choose new lines
-
-    labels = load("labels.jld2", "labels")      # Load labels for instances
-
+    lines = all_lines[new_indexes[1:Int(round(1/5*length(new_indexes)))]]          # Choose new lines
+    labels = all_labels[new_indexes[1:Int(round(1/5*length(new_indexes)))]]        # Choose new labels
+    
     size_to_alloc = size(lines, 1)      # Amount of lines loaded
 
     # Dictionary for storage of part of URLS (Remainder: dictionaries automatically resize) 
@@ -39,14 +44,11 @@ function main(prime::Int64, neurons::Int64)
     bag_indx_parts[parts_of_url[1]] = []
     bag_indx_parts[parts_of_url[2]] = []
     
-    #fill_dict(dict, bag_indx_parts, lines)      # Fill dictionary 
-    ProfileView.@profview fill_dict(dict, bag_indx_parts, lines)
-    #descend(fill_dict,Tuple{Dict{String, Vector{Vector{String}}}, Dict{String, Vector{Int64}}, Vector{String}})
-    #@descend fill_dict(dict, bag_indx_parts, lines)
+    dictionary_handling.fill_dict(dict, bag_indx_parts, lines)      # Fill dictionary 
     
     for key in parts_of_url         # For every key
         for i=1:length(dict[key])       # For every vector in that value vector
-            dict_hashed[key][i] = transform_to_trig(dict[key][i], prime)       # Transform vector in a 
+            dict_hashed[key][i] = dictionary_handling.transform_to_trig(dict[key][i], prime)       # Transform vectors in dict
         end
     end
     
@@ -59,9 +61,9 @@ function main(prime::Int64, neurons::Int64)
     for key in parts_of_url
         histogram_dict[key] = Vector{Vector{Int64}}(undef, size_to_alloc) 
     end
-    
+     
     for key in parts_of_url
-            histogram_dict[key] = hashed_to_hist.(dict_hashed[key], prime)             # Transform hashed trigrams into histograms 
+            histogram_dict[key] = dictionary_handling.hashed_to_hist.(dict_hashed[key], prime)             # Transform hashed trigrams into histograms 
     end   
 
     # Creating bags from from histograms
@@ -70,57 +72,13 @@ function main(prime::Int64, neurons::Int64)
 
     bag_path_index = create_range(bag_indx_parts["path"])
     bag_query_index = create_range(bag_indx_parts["query"])
+    #println(size(bag_path_index))
+    #println(size(bag_query_index))
+    #println(size(bag_query))
+    #println(size(bag_path))
 
     # Train
-    train(bag_path, bag_query, bag_path_index, bag_query_index, labels, neurons)
-end
-
-
-# Fill dict with URL parts and fill bag_indx_parts with lenghts of parts of url
-function fill_dict(D::Dict{String, Vector{Vector{String}}}, E::Dict{String, Vector{Int64}}, lines::Vector{String})
-    D[parts_of_url[2]] = URIs.splitpath.(URI.(lines))           # Map vectors of strings into a D["path"] vector
-    D[parts_of_url[1]] = vectorize_queryparams.(URIs.queryparams.(URI.(lines)))             # Map vectors of strings into a D["query"] vector
-
-    # Alocate memory for E dict = bag_indx_parts
-    E[parts_of_url[1]] = length.(D[parts_of_url[1]])
-    E[parts_of_url[2]] = length.(D[parts_of_url[2]])
-end
-
-# Creating a string vector of key+value from dictionary
-function vectorize_queryparams(X::Dict{String, String})::Vector{String}
-    return map(key -> key * "=" * X[key],collect(keys(X)))
-end
-
-
-# Transforming vector of words into a vector of trigrams
-function transform_to_trig(x::Vector{String}, prime::Int64)::Vector{Vector{UInt64}}
-    trig_vec = Vector{Vector{UInt64}}(undef, length(x))         # Initialize vector to a length of the whole string
-    # Initialize internal vectors
-    for i = 1:length(trig_vec)
-        trig_vec[i] = Vector{UInt64}(undef, length(x[i])-2)         # For each vector within - Initialize new vector to a length of string
-    end
-
-    # For every string in x, create trigram, hash it, map it into a vector on position[ind]
-    for (ind, val) in enumerate(x)
-        map!(trig->trig%prime, trig_vec[ind], hash.([val[i:i+2] for i=1:length(val)-2]))         # Create trigrams, hash them, modulo each hash
-    end
-    return trig_vec
-end
-
-# Place number into a vector - index corresponding to its value
-function place_numb(x::Vector{Int64}, numb::UInt64)
-    x[Int64(numb)] += 1
-end
-
-# Mapping hashed vector onto a histogram vector
-function hashed_to_hist(x::Vector{Vector{UInt64}}, prime::Int64)::Vector{Vector{Int64}}
-    vec_to_ret = Vector{Vector{Int64}}(undef, length(x))        # Initialize the vector to return
-    map!( y->begin # Vector{UInt64}         # Creating trigrams and mapping them into another vector
-        mapping_vec = zeros(Int64, prime)  
-        map(val-> val != 0 && place_numb(mapping_vec, val), y)       # Place numbers onto their corresponding place in the new vector
-        return mapping_vec
-    end, vec_to_ret, x)
-    return vec_to_ret
+    train(bag_path, bag_query, bag_path_index, bag_query_index, labels, neurons, prime)
 end
 
 function count_size(key::String, B::Dict{String, Vector{Int64}})::Int64
@@ -162,34 +120,53 @@ function create_range(x::Vector{Int64})::Vector{UnitRange{Int64}}
 end
 
 
-function train(bag_path::Matrix{UInt64}, bag_query::Matrix{UInt64}, bag_path_index::Vector{UnitRange{Int64}}, bag_query_index::Vector{UnitRange{Int64}}, y::Vector{Int64}, neurons::Int64)
+function train(bag_path::Matrix{UInt64}, bag_query::Matrix{UInt64}, bag_path_index::Vector{UnitRange{Int64}}, bag_query_index::Vector{UnitRange{Int64}}, y::Vector{Int64}, neurons::Int64, prime::Int64)
      # Structure of Node
-     ds = BagNode(ProductNode((BagNode(bag_path,
-                                        bag_path_index),
-                                BagNode(bag_query, 
-                                bag_query_index))), # Won't work, because I deleted 0s 
-                    [1:1, 2:2])
+    #  ds = BagNode(ProductNode((BagNode(bag_path,
+    #                                     bag_path_index),
+    #                             BagNode(bag_query, 
+    #                             bag_query_index))),
+    #                 [1:1, 2:2]) #   Tohle musí být špatně. Musí zde být označení instancí, které jsou positiv a negativ?
 
+    BM1 = BagNode(bag_path, bag_path_index)
+    BM2 = BagNode(bag_query, bag_query_index)
+    PN = tuple(BM1, BM2) |> ProductNode
+    ds = BagNode(PN, [1:1, 2:2])
     printtree(ds)
 
-    
-    y = map(i->maximum(y[i])+1, ds.bags)
+
+    #println(ds.bags) # = [1:1, 2:2]
+
+    # OneHot
+    y = map(i->maximum(y[i])+1, ds.bags) # Tohle je dobře, ale pracuje to se špatnými daty!
+    #println(size(y))
     y_oh = onehotbatch(y,1:2)
+    #println(y_oh)
 
-    # Model through reflection model 
-    model = reflectinmodel(ds, d->Dense(d,neurons), SegmentedMeanMax)
-    printtree(model)
 
-    model(ds)
-
+    # Model    
+    model = BagModel(           # totaly same model as from reflectinmodel
+                ProductModel(tuple(
+                    BagModel(
+                        ArrayModel(Dense(prime=>2)), SegmentedMeanMax(2), Dense(4=>4)),
+                    BagModel(
+                        ArrayModel(Dense(prime=>2)), SegmentedMeanMax(2), Dense(4=>4))
+                    ),  Dense(8=>4)),
+            SegmentedMeanMax(4), Chain(Dense(8=>2), softmax))  # Output has to be 2 bcs I am classyfing into 2 classes right?
+    
+    #printtree(model)
+    
+    print(model(ds))
     opt_state = Flux.setup(Adam(), model)
 
 
     loss(m, x, y) = Flux.logitcrossentropy(m(x), y)
 
-    # for e in 1:500
+    # for e in 1:10
     #     if e % 10 == 1
     #         @info "Epoch $e" training_loss=loss(model, ds, y_oh)
+    #         #acc = mean(Flux.onecold(model(ds), 1:2) .==y)
+    #         #print(acc)
     #     end
     #     Flux.train!(loss, model, [(ds, y_oh)], opt_state)
     # end
