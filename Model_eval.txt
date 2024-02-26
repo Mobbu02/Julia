@@ -1,0 +1,70 @@
+    Seed: 1998168933
+    Correct rate of predictions: 0.75
+    Precision = 1.0
+    Confusion matrix: 
+                        |   | T | F |
+                        | P | 2 | 8 |
+                        | N | 919 | 292 |
+
+    Amount of neurons in each part of the network:
+        |  BM_path |  BM_query |  PM  |
+      1.|     6    |     2     |  4  |
+      2.|     5    |      1    |      |
+
+
+    Seed: 1763774028
+    Correct rate of predictions: 0.75
+    Precision = 1.0
+    Confusion matrix: 
+                        |   | T | F |
+                        | P | 1 | 1 |
+                        | N | 910 | 309 |
+
+    Amount of neurons in each part of the network:
+        |  BM_path |  BM_query |  PM  |
+      1.|     6    |     2     |  4  |
+      2.|     5    |      1    |      |
+
+
+    Seed: 3321628227
+    Correct rate of predictions: 0.25
+    Precision = 1.0
+    Confusion matrix: 
+                        |   | T | F |
+                        | P | 2997 | 9216 |
+                        | N | 0 | 0 |
+
+    Amount of neurons in each part of the network:
+        |  BM_path |  BM_query |  PM  |
+      1.|     6    |     2     |  4  |
+      2.|     5    |      1    |      |
+
+
+    Seed: 1554924145
+    Correct rate of predictions: 0.76
+    Precision = 1.0
+    Confusion matrix: 
+                        |   | T | F |
+                        | P | 3 | 2 |
+                        | N | 9278 | 2930 |
+
+    Amount of neurons in each part of the network:
+        |  BM_path |  BM_query |  PM  |
+      1.|     6    |     2     |  4  |
+      2.|     5    |      1    |      |
+
+
+    Seed: 2857046980
+    Correct rate of predictions: 0.75
+    Precision = 1.0
+    Confusion matrix: 
+                        |   | T | F |
+                        | P | 1 | 0 |
+                        | N | 9184 | 3028 |
+
+    Amount of neurons in each part of the network:
+        |  BM_path |  BM_query |  PM  |
+      1.|     6    |     2     |  4  |
+      2.|     5    |      1    |      |
+
+
