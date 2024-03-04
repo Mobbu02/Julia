@@ -11,6 +11,9 @@ export evaluate_model
 
 global template = """
     Seed: {3}
+    Number of epochs: {13}
+    Percentage of positive instances in the training data: {14}
+    Used batchsize: {15}
     Correct rate of predictions: {1}
     Precision = {2}
     Confusion matrix: 
@@ -72,8 +75,8 @@ end
 function eval_model(filename::String, M::Matrix{Float32}, true_labels::Vector{Int64}, seed::Int64, neurons::Tuple)::Nothing
 
     # Performance 
-    permormance_val = evaluate_performance(M, true_labels .+1, seed)
-    new_tuple = (permormance_val..., neurons...)
+    permormance_val = evaluate_performance(M, true_labels.+1, seed)
+    new_tuple = (permormance_val..., neurons...) # Collapse them together
     
     # Write performance
     append_eval(filename, new_tuple)

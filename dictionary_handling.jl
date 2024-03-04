@@ -14,28 +14,12 @@ export fill_hash_dict!
 
 parts_of_url = ["query", "path"]
 
-
-# Preallocation function
-function preall!(D::Dict{K, Vector{V}}, size::Int)::Nothing where {K, V}
-    for key in keys(D)
-        D[key] = Vector{V}(undef, size)
-    end
-    return nothing
-end
-
 # Fill dict with URL parts and fill bag_indx_parts with lenghts of parts of url
-function fill_dict!(D::Dict{String, Vector{Vector{String}}}, E::Dict{String, Vector{Int64}}, size::Int64, lines::Vector{String})::Nothing
-
-    # Preallocate
-    for key in keys(D)
-        D[key] = Vector{Vector{String}}(undef, size) 
-    end
-    # Preallocate
-    #preall!(D, size)
+function fill_dict!(D::Dict{String, Vector{Vector{String}}}, E::Dict{String, Vector{Int64}}, lines::Vector{String})::Nothing
 
     # Fill dictionary
-    D[parts_of_url[2]] .= URIs.splitpath.(URI.(lines))     # Map vectors of strings into a D["path"] vector
-    D[parts_of_url[1]] .= vectorize_queryparams.(URIs.queryparams.(URI.(lines)))     # Map vectors of strings into a D["query"] vector
+    D[parts_of_url[2]] = URIs.splitpath.(URI.(lines))     # Map vectors of strings into a D["path"] vector
+    D[parts_of_url[1]] = vectorize_queryparams.(URIs.queryparams.(URI.(lines)))     # Map vectors of strings into a D["query"] vector
 
     # Fill dictionary with lenghts of URLs
     E[parts_of_url[1]] = length.(D[parts_of_url[1]])
@@ -65,29 +49,19 @@ function transform_to_trig(x::Vector{String}, prime::Int64)::Vector{Vector{UInt6
 end
 
 # Fill dict_hashed
-function fill_dict_hashed!(D::Dict{String, Vector{Vector{String}}}, H::Dict{String, Vector{Vector{Vector{UInt64}}}}, size::Int64, prime::Int64)::Nothing
-    # Preallocate
-    for key in keys(D)
-        H[key] = Vector{Vector{String}}(undef, size) 
-    end
-
+function fill_dict_hashed!(D::Dict{String, Vector{Vector{String}}}, H::Dict{String, Vector{Vector{Vector{UInt64}}}}, prime::Int64)::Nothing
     # Fill
     for key in parts_of_url
-        H[key] .= transform_to_trig.(D[key], prime)
+        H[key] = transform_to_trig.(D[key], prime)
     end
     return nothing
 end
 
 # Fill histogram_dict
-function fill_hash_dict!(D::Dict{String, Vector{Vector{Vector{UInt64}}}}, H::Dict{String, Vector{Vector{Vector{Int64}}}}, size::Int64, prime::Int64)::Nothing
-    # Preallocate
-    for key in keys(D)
-        H[key] = Vector{Vector{Int64}}(undef, size) 
-    end
-
+function fill_hash_dict!(D::Dict{String, Vector{Vector{Vector{UInt64}}}}, H::Dict{String, Vector{Vector{Vector{Int64}}}}, prime::Int64)::Nothing
     # Fill
     for key in keys(H)
-        H[key] .= hashed_to_hist.(D[key], prime)
+        H[key] = hashed_to_hist.(D[key], prime)
     end
     return nothing
 end
