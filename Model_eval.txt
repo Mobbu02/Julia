@@ -1110,3 +1110,213 @@
       2.|     20    |     65     |      |
 
 
+    Seed: 1994720929
+    Percentage of data for training: 20.0
+    Percentage of positive instances in the training data: 0.42
+    Prime: 2053
+    Number of epochs: 50
+    Used batchsize: 64
+    Learning rate: 0.005
+    Correct rate of predictions: 0.84
+    Precision: 0.73
+    F-score: 0.83
+    Confusion matrix: 
+                        |   | T | F |
+                        | P | 4733 | 1729 |
+                        | N | 5563 | 189 |
+
+    Amount of neurons in each part of the network:
+        |  BM_path |  BM_query |  PM  |
+      1.|     20    |     70     |  50  |
+      2.|     20    |     65     |      |
+
+
+    Seed: 629367023
+    Percentage of data for training: 20.0
+    Percentage of positive instances in the training data: 0.41
+    Prime: 2053
+    Number of epochs: 50
+    Used batchsize: 128
+    Learning rate: 0.005
+    Correct rate of predictions: 0.84
+    Precision: 0.73
+    F-score: 0.83
+    Confusion matrix: 
+                        |   | T | F |
+                        | P | 4832 | 1827 |
+                        | N | 5390 | 165 |
+
+    Amount of neurons in each part of the network:
+        |  BM_path |  BM_query |  PM  |
+      1.|     20    |     70     |  50  |
+      2.|     20    |     65     |      |
+
+
+    Seed: 2898642699
+    Percentage of data for training: 20.0
+    Percentage of positive instances in the training data: 0.41
+    Prime: 2053
+    Number of epochs: 50
+    Used batchsize: 256
+    Learning rate: 0.005
+    Correct rate of predictions: 0.84
+    Precision: 0.73
+    F-score: 0.83
+    Confusion matrix: 
+                        |   | T | F |
+                        | P | 4790 | 1746 |
+                        | N | 5526 | 152 |
+
+    Amount of neurons in each part of the network:
+        |  BM_path |  BM_query |  PM  |
+      1.|     20    |     70     |  50  |
+      2.|     20    |     65     |      |
+
+
+    Seed: 3688248091
+    Percentage of data for training: 20.0
+    Percentage of positive instances in the training data: 0.42
+    Prime: 2053
+    Number of epochs: 50
+    Used batchsize: 256
+    Learning rate: 0.02
+    Correct rate of predictions: 0.84
+    Precision: 0.73
+    F-score: 0.83
+    Confusion matrix: 
+                        |   | T | F |
+                        | P | 4852 | 1786 |
+                        | N | 5397 | 179 |
+
+    Amount of neurons in each part of the network:
+        |  BM_path |  BM_query |  PM  |
+      1.|     20    |     70     |  50  |
+      2.|     20    |     65     |      |
+
+
+    Seed: 4172107246
+    Percentage of data for training: 20.0
+    Percentage of positive instances in the training data: 0.41
+    Prime: 2053
+    Number of epochs: 50
+    Used batchsize: 512
+    Learning rate: 0.005
+    Correct rate of predictions: 0.85
+    Precision: 0.77
+    F-score: 0.83
+    Confusion matrix: 
+                        |   | T | F |
+                        | P | 4445 | 1319 |
+                        | N | 5888 | 562 |
+
+    Amount of neurons in each part of the network:
+        |  BM_path |  BM_query |  PM  |
+      1.|     20    |     70     |  50  |
+      2.|     20    |     65     |      |
+
+
+    Seed: 2889301498
+    Percentage of data for training: 20.0
+    Percentage of positive instances in the training data: 0.4
+    Prime: 2053
+    Number of epochs: 50
+    Used batchsize: 512
+    Learning rate: 0.005
+    Correct rate of predictions: 0.85
+    Precision: 0.8
+    F-score: 0.82
+    Confusion matrix: 
+                        |   | T | F |
+                        | P | 4373 | 1111 |
+                        | N | 5963 | 767 |
+
+    Amount of neurons in each part of the network:
+        |  BM_path |  BM_query |  PM  |
+      1.|     20    |     70     |  50  |
+      2.|     20    |     65     |      |
+
+
+    Seed: 1125731841
+    Percentage of data for training: 20.0
+    Percentage of positive instances in the training data: 0.41
+    Prime: 2053
+    Number of epochs: 50
+    Used batchsize: 1024
+    Learning rate: 0.005
+    Correct rate of predictions: 0.85
+    Precision: 0.75
+    F-score: 0.83
+    Confusion matrix: 
+                        |   | T | F |
+                        | P | 4700 | 1529 |
+                        | N | 5622 | 363 |
+
+    Amount of neurons in each part of the network:
+        |  BM_path |  BM_query |  PM  |
+      1.|     20    |     70     |  50  |
+      2.|     20    |     65     |      |
+
+
+    Seed: 2083258438
+    Percentage of data for training: 20.0
+    Percentage of positive instances in the training data: 0.41
+    Prime: 2053
+    Number of epochs: 50
+    Used batchsize: 2056
+    Learning rate: 0.005
+    Correct rate of predictions: 0.85
+    Precision: 0.76
+    F-score: 0.83
+    Confusion matrix: 
+                        |   | T | F |
+                        | P | 4703 | 1493 |
+                        | N | 5640 | 378 |
+
+    Amount of neurons in each part of the network:
+        |  BM_path |  BM_query |  PM  |
+      1.|     20    |     70     |  50  |
+      2.|     20    |     65     |      |
+
+
+    Seed: 625838007
+    Percentage of data for training: 20.0
+    Percentage of positive instances in the training data: 0.41
+    Prime: 2053
+    Number of epochs: 50
+    Used batchsize: 4096
+    Learning rate: 0.005
+    Correct rate of predictions: 0.84
+    Precision: 0.76
+    F-score: 0.82
+    Confusion matrix: 
+                        |   | T | F |
+                        | P | 4352 | 1404 |
+                        | N | 5897 | 561 |
+
+    Amount of neurons in each part of the network:
+        |  BM_path |  BM_query |  PM  |
+      1.|     20    |     70     |  50  |
+      2.|     20    |     65     |      |
+
+
+    Seed: 338367354
+    Percentage of data for training: 20.0
+    Percentage of positive instances in the training data: 0.41
+    Prime: 2053
+    Number of epochs: 50
+    Used batchsize: 8
+    Learning rate: 0.005
+    Correct rate of predictions: 0.84
+    Precision: 0.73
+    F-score: 0.83
+    Confusion matrix: 
+                        |   | T | F |
+                        | P | 4891 | 1809 |
+                        | N | 5363 | 151 |
+
+    Amount of neurons in each part of the network:
+        |  BM_path |  BM_query |  PM  |
+      1.|     20    |     70     |  50  |
+      2.|     20    |     65     |      |
+
+
