@@ -1,0 +1,213 @@
+using Revise
+using Mill, HTTP, JLD2, Random, OneHotArrays, Flux, Statistics
+
+include("eval_mod.jl")
+using  .eval_mod
+
+function main(epochs::Int64, batchsize::Int64, path_neur_1::Int64, path_neur_2::Int64, query_neur_1::Int64, query_neur_2::Int64, path_query_neur::Int64, percentage_of_data::Int64 = 5, lr::Float64 = 0.001, prime::Int64 = 2053)::Nothing
+    
+    # Read lines
+    all_urls = load("Julia/Lines/new_combined_lines.jld2", "lines")     #  Load URL addresses
+    all_labels = load("Julia/Lines/shuffled_labels.jld2", "labels_vector")      # Load labels for URLs
+
+    # Generate random number every time
+    random_seed = rand(UInt32)
+    println("Seed: ", random_seed)
+
+    new_indexing = randcycle(MersenneTwister(random_seed), length(all_urls))     # Generate permutation of set length, seed the generator with random_seed
+    amount_of_training_data = Int(round((1/percentage_of_data)*length(new_indexing)))     # Specify the amount of data wanted
+
+    # Create the training data and the evaluation data 
+    training_lines = all_urls[new_indexing[1:amount_of_training_data]]      # Choose training lines
+    training_labels = all_labels[new_indexing[1:amount_of_training_data]]     # Choose training labels
+
+    eval_lines = all_urls[new_indexing[amount_of_training_data:2*amount_of_training_data]]      # Choose eval lines
+    eval_labels = all_labels[new_indexing[amount_of_training_data:2*amount_of_training_data]]     # Choose eval labels
+
+    # Calculate the percentage of positive instances within the data
+    per_of_positive_instances = round((sum(training_labels))/length(training_labels), digits = 2)
+    println("Percentage of positive urls within the training lines: ", per_of_positive_instances)
+    println("Percentage of positive urls within the eval lines: ", sum(eval_labels)/length(eval_labels))
+    println("Number of positive urls within eval data: ", sum(eval_labels))
+    #println(length(eval_labels))
+
+    # Prepare training and evaluation data
+    training_urls = url_to_mill.(training_lines)
+    eval_urls = url_to_mill.(eval_lines)
+
+    # Construct struct of parameters
+    network_param = Network_params(random_seed, epochs, batchsize, prime, per_of_positive_instances, path_neur_1, path_neur_2, query_neur_1, query_neur_2, path_query_neur, round(100/percentage_of_data, digits = 2), lr)
+
+    predicted_labels = train(training_urls, eval_urls, training_labels, eval_labels, network_param)
+
+    # Save results to a file
+    eval_mod.eval_model("Julia/Model_eval.txt", eval_labels .+ 1, predicted_labels, network_param)
+
+    return nothing
+end
+
+struct Network_params
+    seed::Int64
+    epochs::Int64
+    batchsize::Int64
+    prime::Int64
+    positive_instances::Float64
+    path_neur_1::Int64
+    path_neur_2::Int64
+    query_neur_1::Int64
+    query_neur_2::Int64
+    path_query_neur::Int64
+    percentage_of_data::Float64
+    learning_rate::Float64
+end
+
+function gather_decisions(X::Matrix{Float64})::Vector{Int64}
+    predicted_labels = zeros(Int64, size(X,2))
+
+    for i in 1:size(X,2)
+        predicted_labels[i] = X[1,i] > 0.5 ? 0 : 1
+    end
+    return predicted_labels
+end
+
+function eval(X, true_labels)
+    predicted_lab = gather_decisions(X) .+ 1
+    corrate = MLBase.correctrate(true_labels, predicted_lab)
+    println(corrate)
+    return nothing #predicted_lab .-1
+end
+
+# Takes in a URL as string and divides it, then creates bagnodes and finally a single product node for single URL
+function url_to_mill(input::String)::ProductNode
+
+    url = HTTP.URI(input) # Create "URL" type
+    
+    # Create parts of the URL
+    host = url.host
+    path = url.path
+    query = url.query
+
+    path = path[2:end] # Remove the first 
+
+    # Prepare input into functions
+    host = String.(split(host,"."))
+    path = filter(!isempty, String.(split(path,"/")))
+    query = String.(split(query,"&"))
+
+    # Will not be including host into the product node, since it is the same for all url withing the training set
+    model = Mill.ProductNode((transform(path), 
+                             transform(query)
+                                ))
+    return model
+end
+
+# Transforms vector string[URL] into a BagNode
+function transform(input::Vector{String})::BagNode
+    # Check for empty path
+    if isempty(input)
+        input = [""]
+    end
+    matrix = Mill.NGramMatrix(input)    # Create NGramMatrix from the string
+    bn = Mill.BagNode(Mill.ArrayNode(matrix), [1:length(input)])     # NgramMatrix can act as ArrayNode data
+    return bn
+end
+
+function train(training_urls, eval_urls, training_labels::Vector{Int64}, eval_labels::Vector{Int64}, param::Network_params)::Vector{Int64}
+ 
+    # Create model of the network
+    model = Mill.ProductModel(tuple(
+        Mill.BagModel(Mill.ArrayModel(Flux.Dense(param.prime => param.path_neur_1, bias = true, tanh)), Mill.SegmentedMeanMax(param.path_neur_1), Flux.Dense(2*param.path_neur_1 => param.path_neur_2, bias = true, tanh)),
+        Mill.BagModel(Mill.ArrayModel(Flux.Dense(param.prime => param.query_neur_1, bias = true, elu)), Mill.SegmentedMeanMax(param.query_neur_1), Flux.Dense(2*param.query_neur_1=> param.query_neur_2, bias = true, elu))
+                            ), Flux.Chain(Flux.Dense(param.path_neur_2 + param.query_neur_2 => param.path_query_neur, bias = true, relu), Flux.Dense(param.path_query_neur=>2))
+                            )
+
+    # Create a loss function
+    loss(ds, y) = Flux.Losses.logitbinarycrossentropy(model(ds), OneHotArrays.onehotbatch(y .+ 1, 1:2))  # Onehot inside from training labels
+
+    #model = reflectinmodel(training_urls[10], d -> Dense(d, 2, relu), SegmentedMeanMax)
+
+    # Optimizer
+    opt = Flux.Adam(param.learning_rate)
+    par = Flux.params(model)    # Parameters of the model
+
+    # Accuracy function
+    acc(ds, y) = Statistics.mean(Flux.onecold(model(ds)) .== y.+ 1)    # Reverse of Onehot back to pure labels from the output matrix and calculating the mean of correctly predicted labels
+    
+    # Create minibatches
+    data_loader = Flux.DataLoader((training_urls, training_labels), batchsize = param.batchsize , shuffle = true, partial = false)
+    
+    # Training loop
+    for i in 1:param.epochs
+        Flux.Optimise.train!(loss, par, data_loader, opt)
+        if i % 10 == 1
+            #@info "Epoch $i"
+            @show acc(eval_urls, eval_labels)
+        end
+        # if i % 3 == 1
+        #    @info loss(training_urls, training_labels) 
+        # end
+    end
+
+
+    @show acc(eval_urls, eval_labels)   # Show accuracy of the model
+    probs = softmax(model(eval_urls))   # Transform output into probabilities
+    
+    o = Flux.onecold(probs)             # Transform back the probabilities into labels
+    mn = mean(o .== eval_labels .+ 1)   # Calculate the mean of correct predictions
+    println("Mean of correct predictions: ", mn)
+
+    return o
+end
+
+
+# Epochs, batchsize, path_neur1, path_neur_2, query_neur_1, query_neur_2, prime = 2053
+main(50, 32, 20, 20, 70, 65, 50, 5, 0.005)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Vector{ProductNode{NamedTuple{(:lumo, :inda, :logp, :ind1, :atoms), Tuple{ArrayNode{OneHotMatrix{UInt32, Vector{UInt32}}, Nothing}, ArrayNode{OneHotMatrix{UInt32, Vector{UInt32}}, Nothing}, 
+# ArrayNode{OneHotMatrix{UInt32, Vector{UInt32}}, Nothing}, ArrayNode{OneHotMatrix{UInt32, Vector{UInt32}}, Nothing}, BagNode{ProductNode{NamedTuple{(:element, :bonds, :charge, :atom_type), 
+# Tuple{ArrayNode{OneHotMatrix{UInt32, Vector{UInt32}}, Nothing}, BagNode{ProductNode{NamedTuple{(:element, :bond_type, :charge, :atom_type), Tuple{ArrayNode{OneHotMatrix{UInt32, Vector{UInt32}}, Nothing}, 
+# ArrayNode{OneHotMatrix{UInt32, Vector{UInt32}}, Nothing}, ArrayNode{Matrix{Float32}, Nothing}, ArrayNode{OneHotMatrix{UInt32, Vector{UInt32}}, Nothing}}}, Nothing}, AlignedBags{Int64}, Nothing}, ArrayNode{Matrix{Float32}, Nothing}, 
+# ArrayNode{OneHotMatrix{UInt32, Vector{UInt32}}, Nothing}}}, Nothing}, AlignedBags{Int64}, Nothing}}}, Nothing}}
+
+#Vector{ProductNode{NamedTuple{(:path, :query), Tuple{BagNode{ArrayNode{NGramMatrix{String, Vector{String}, Int64}, Nothing}, AlignedBags{Int64}, Nothing}, 
+# BagNode{ArrayNode{NGramMatrix{String, Vector{String}, Int64}, Nothing}, AlignedBags{Int64}, Nothing}}}, Nothing}}
+
+
+# ProductNode{NamedTuple{(:lumo, :inda, :logp, :ind1, :atoms), Tuple{ArrayNode{OneHotMatrix{UInt32, Vector{UInt32}}, Nothing}, ArrayNode{OneHotMatrix{UInt32, Vector{UInt32}}, Nothing}, ArrayNode{OneHotMatrix{UInt32, Vector{UInt32}}, Nothing}, 
+# ArrayNode{OneHotMatrix{UInt32, Vector{UInt32}}, Nothing}, BagNode{ProductNode{NamedTuple{(:element, :bonds, :charge, :atom_type), Tuple{ArrayNode{OneHotMatrix{UInt32, Vector{UInt32}}, Nothing}, 
+# BagNode{ProductNode{NamedTuple{(:element, :bond_type, :charge, :atom_type), Tuple{ArrayNode{OneHotMatrix{UInt32, Vector{UInt32}}, Nothing}, ArrayNode{OneHotMatrix{UInt32, Vector{UInt32}}, Nothing}, 
+# ArrayNode{Matrix{Float32}, Nothing}, ArrayNode{OneHotMatrix{UInt32, Vector{UInt32}}, Nothing}}}, Nothing}, AlignedBags{Int64}, Nothing}, ArrayNode{Matrix{Float32}, Nothing}, ArrayNode{OneHotMatrix{UInt32, Vector{UInt32}}, Nothing}}}, Nothing},
+#  AlignedBags{Int64}, Nothing}}}, Nothing}
+#  [ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, 
+#  ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, 
+#  ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, 
+#  ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, 
+#  ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, 
+#  ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode, ProductNode]

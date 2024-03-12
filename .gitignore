@@ -1,4 +1,3 @@
-/.ipynb_checkpoints
 /.vscode
 /clean1.data
 /Lines
@@ -13,3 +12,7 @@
 /labels.jld2
 /copy.jl
 /line_filter.jl
+/test1.jl
+dictionary_handling.jl
+URL_Classification.jl
+dictionary_handling.jl

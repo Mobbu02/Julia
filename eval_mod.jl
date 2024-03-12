@@ -5,26 +5,29 @@ module eval_mod
 #using Plots
 using MLBase
 
-export gather_decisions
-export evaluate_model
+export eval_model
 
 
 global template = """
-    Seed: {3}
-    Number of epochs: {13}
-    Percentage of positive instances in the training data: {14}
-    Used batchsize: {15}
+    Seed: {8}
+    Percentage of data for training: {18}
+    Percentage of positive instances in the training data: {12}
+    Prime: {11}
+    Number of epochs: {9}
+    Used batchsize: {10}
+    Learning rate: {19}
     Correct rate of predictions: {1}
-    Precision = {2}
+    Precision: {2}
+    F-score: {7}
     Confusion matrix: 
                         |   | T | F |
-                        | P | {4} | {5} |
-                        | N | {6} | {7} |
+                        | P | {5} | {6} |
+                        | N | {3} | {4} |
 
     Amount of neurons in each part of the network:
         |  BM_path |  BM_query |  PM  |
-      1.|     {8}    |     {9}     |  {12}  |
-      2.|     {10}    |      {11}    |      |
+      1.|     {13}    |     {15}     |  {17}  |
+      2.|     {14}    |     {16}     |      |
 """
 
 # Append evaluation of model at the end of the Model_eval.txt file
@@ -40,20 +43,18 @@ function append_eval(filename::String, values::Tuple)::Nothing
     return nothing
 end
 
-# Takes in a matrix from the model of size 2xnumber. Each column = probabilities of instance beinging negative or positive
-function gather_decisions(X::Matrix{Float32})::Vector{Int64}
-    predicted_labels = zeros(Int64, size(X,2))
-
-    for i in 1:size(X,2)
-        predicted_labels[i] = X[1,i] > 0.5 ? 1 : 0
-    end
-    return predicted_labels
+struct Evaluation
+    correct_pred_rate::Float64
+    precision::Float64
+    true_pos::Int64
+    false_pos::Int64
+    true_neg::Int64
+    false_neg::Int64
+    F_score::Float64
 end
 
 # Evaluate the performance of trained model
-function evaluate_performance(X::Matrix{Float32}, true_labels::Vector{Int64}, seed::Int64)::Tuple
-    # Get predicted labels
-    predicted_labels = gather_decisions(X) .+ 1
+function evaluate_performance(true_labels::Vector{Int64}, predicted_labels::Vector{Int64})::Evaluation
 
     # Rate of correct predictions
     corr_rate = correctrate(true_labels, predicted_labels)   # Float64
@@ -65,27 +66,51 @@ function evaluate_performance(X::Matrix{Float32}, true_labels::Vector{Int64}, se
     #roc_curve = roc(true_labels, predicted_labels)
 
     # Calculate precison 
-    #precis = precision(roc_curve)  #Float64
-    precis = 1
+    precis = (conf_matrix[2,2])/(conf_matrix[2,2] + conf_matrix[1,2])
 
-    return tuple(round(corr_rate, digits = 2), round(precis, digits = 2), seed, conf_matrix[2,2], conf_matrix[1,2], conf_matrix[1,1], conf_matrix[2,1])
+    # Calculate recall
+    recal = (conf_matrix[2,2])/(conf_matrix[2,2] + conf_matrix[2,1])
+
+    # F_score
+    f_score = round(2 * (precis * recal)/(precis+recal), digits = 2)
+
+    return Evaluation(round(corr_rate, digits = 2), round(precis, digits = 2), conf_matrix[1,1], conf_matrix[2,1], conf_matrix[2,2], conf_matrix[1,2], f_score)
+    #return tuple(round(corr_rate, digits = 2), round(precis, digits = 2), conf_matrix[2,2], conf_matrix[1,2], conf_matrix[1,1], conf_matrix[2,1])
 end
 
-
-function eval_model(filename::String, M::Matrix{Float32}, true_labels::Vector{Int64}, seed::Int64, neurons::Tuple)::Nothing
+function eval_model(filename::String, true_labels::Vector{Int64}, predicted_labels::Vector{Int64}, param)::Nothing
 
     # Performance 
-    permormance_val = evaluate_performance(M, true_labels.+1, seed)
-    new_tuple = (permormance_val..., neurons...) # Collapse them together
+    permormance_val = evaluate_performance(true_labels, predicted_labels)
     
+    # Combine structs for file  writing
+    new_tuple = combine_structs_to_tuple(permormance_val, param)
+
     # Write performance
     append_eval(filename, new_tuple)
     return nothing
 end
 
-function plot(x, y, iteration)
-
+# Merging of structs into a single tuple
+function struct_to_tuple(s)::Tuple
+    field_values = Vector{Any}(undef, fieldcount(typeof(s)))
+    for (i, field_name) in enumerate(fieldnames(typeof(s)))
+       field_values[i] = getfield(s, field_name)
+    end
+    return tuple(field_values...)
 end
+
+function combine_structs_to_tuple(s1, s2)::Tuple
+    tuple1 = struct_to_tuple(s1)
+    tuple2 = struct_to_tuple(s2)
+    return (tuple1..., tuple2...)
+end
+
+
+
+
+# Experiment
+
 
 
 
