@@ -2,7 +2,7 @@
 
 module eval_mod
 
-#using Plots
+using Plots
 using MLBase
 
 export eval_model
@@ -16,7 +16,7 @@ global template = """
     Number of epochs: {9}
     Used batchsize: {10}
     Learning rate: {19}
-    Correct rate of predictions: {1}
+    Recall: {1}
     Precision: {2}
     F-score: {7}
     Confusion matrix: 
@@ -28,6 +28,12 @@ global template = """
         |  BM_path |  BM_query |  PM  |
       1.|     {13}    |     {15}     |  {17}  |
       2.|     {14}    |     {16}     |      |
+
+    Activation functions in parts of the network:
+      |  BM_path |  BM_query |  PM  |
+    1.|     {20}    |     {22}     |  {24}  |
+    2.|     {21}    |     {23}     |      |
+    
 """
 
 # Append evaluation of model at the end of the Model_eval.txt file
@@ -44,7 +50,7 @@ function append_eval(filename::String, values::Tuple)::Nothing
 end
 
 struct Evaluation
-    correct_pred_rate::Float64
+    recall::Float64
     precision::Float64
     true_pos::Int64
     false_pos::Int64
@@ -57,7 +63,7 @@ end
 function evaluate_performance(true_labels::Vector{Int64}, predicted_labels::Vector{Int64})::Evaluation
 
     # Rate of correct predictions
-    corr_rate = correctrate(true_labels, predicted_labels)   # Float64
+    #corr_rate = correctrate(true_labels, predicted_labels)   # Float64
 
     # Create consufion matrix
     conf_matrix = confusmat(2, true_labels, predicted_labels)
@@ -74,17 +80,18 @@ function evaluate_performance(true_labels::Vector{Int64}, predicted_labels::Vect
     # F_score
     f_score = round(2 * (precis * recal)/(precis+recal), digits = 2)
 
-    return Evaluation(round(corr_rate, digits = 2), round(precis, digits = 2), conf_matrix[1,1], conf_matrix[2,1], conf_matrix[2,2], conf_matrix[1,2], f_score)
+    return Evaluation(round(recal, digits = 2), round(precis, digits = 2), conf_matrix[1,1], conf_matrix[2,1], conf_matrix[2,2], conf_matrix[1,2], f_score)
     #return tuple(round(corr_rate, digits = 2), round(precis, digits = 2), conf_matrix[2,2], conf_matrix[1,2], conf_matrix[1,1], conf_matrix[2,1])
 end
 
-function eval_model(filename::String, true_labels::Vector{Int64}, predicted_labels::Vector{Int64}, param)::Nothing
+# Evaluation of the model
+function eval_model(filename::String, true_labels::Vector{Int64}, predicted_labels::Vector{Int64}, param_of_network)::Nothing
 
     # Performance 
     permormance_val = evaluate_performance(true_labels, predicted_labels)
     
     # Combine structs for file  writing
-    new_tuple = combine_structs_to_tuple(permormance_val, param)
+    new_tuple = combine_structs_to_tuple(permormance_val, param_of_network)
 
     # Write performance
     append_eval(filename, new_tuple)
@@ -106,10 +113,13 @@ function combine_structs_to_tuple(s1, s2)::Tuple
     return (tuple1..., tuple2...)
 end
 
+function plot_acc_vs(acc::Vector{Float64}, vss::Vector{Int64})::Nothing
+    #Plots.plot(vss, acc)
 
-
-
-# Experiment
+    scatter(vss, acc, label="Data Points", xticks=(vss, string.(vss)))  # Convert x-values to strings for labels
+    savefig("acc_vs.png")
+    return nothing
+end
 
 
 

@@ -11,7 +11,7 @@ export hashed_to_hist
 export fill_dict!
 export fill_dict_hashed!
 export fill_hash_dict!
-
+# test
 parts_of_url = ["query", "path"]
 
 # Fill dict with URL parts and fill bag_indx_parts with lenghts of parts of url
