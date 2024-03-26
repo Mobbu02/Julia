@@ -6,6 +6,7 @@ using Plots
 using MLBase
 
 export eval_model
+export evaluate_performance
 
 
 global template = """
@@ -66,7 +67,7 @@ function evaluate_performance(true_labels::Vector{Int64}, predicted_labels::Vect
     #corr_rate = correctrate(true_labels, predicted_labels)   # Float64
 
     # Create consufion matrix
-    conf_matrix = confusmat(2, true_labels, predicted_labels)
+    conf_matrix = confusmat(2, true_labels.+1, predicted_labels)
 
     # Compute ROC curve, output is an Array{ROCNums{Int}}(undef, nt)
     #roc_curve = roc(true_labels, predicted_labels)

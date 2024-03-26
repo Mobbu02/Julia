@@ -1,17 +1,8 @@
 using Revise
-using Mill, HTTP, JLD2, Random, OneHotArrays, Flux, Statistics, FindSteadyStates
-
-include("eval_mod.jl")
-using  .eval_mod
+using Mill, HTTP, JLD2, Random, OneHotArrays, Flux, Statistics, IterTools, DataFrames, CSV, MLBase, SparseArrays
 
 
-
-function main(epochs::Int64, batchsize::Int64, path_neur_1::Int64, path_neur_2::Int64, query_neur_1::Int64, query_neur_2::Int64, path_query_neur::Int64, 
-    activs::Vector{String},   #act_path_neur_1::String, act_path_neur_2::String, act_query_neur_1::String, act_query_neur_2::String, act_path_query_neur::String, 
-    percentage_of_data::Float64 = 5.0, lr::Float64 = 0.001, prime::Int64 = 2053, ngrams::Int64 = 3, base::Int64=256)::Nothing
-
-    # Check for correct activation functions
-    check_activation_func.(activs)
+function main(ranges::Vector{<:AbstractRange}, percentage_of_data::Float64=0.005, prime::Int64=2053, ngrams::Int64=3, base::Int64=256)::Nothing
 
     # Read lines
     all_urls = JLD2.load("Julia/Lines/new_combined_lines.jld2", "lines")     #  Load URL addresses
@@ -20,16 +11,15 @@ function main(epochs::Int64, batchsize::Int64, path_neur_1::Int64, path_neur_2::
     # Generate random number every time
     random_seed = rand(UInt32)
     println("Seed: ", random_seed)
-
     new_indexing = randcycle(MersenneTwister(random_seed), length(all_urls))     # Generate permutation of set length, seed the generator with random_seed
-    amount_of_training_data = Int(round((1/percentage_of_data)*length(new_indexing)))     # Specify the amount of data wanted
+    amount_of_training_data = Int(round(percentage_of_data*length(new_indexing)))     # Specify the amount of data wanted
 
     # Create the training data and the evaluation data 
     training_lines = all_urls[new_indexing[1:amount_of_training_data]]      # Choose training lines
     training_labels = all_labels[new_indexing[1:amount_of_training_data]]     # Choose training labels
 
-    eval_lines = all_urls[new_indexing[amount_of_training_data:end]]      # Choose eval lines
-    eval_labels = all_labels[new_indexing[amount_of_training_data:end]]     # Choose eval labels
+    eval_lines = all_urls[new_indexing[amount_of_training_data:2*amount_of_training_data]]      # Choose eval lines
+    eval_labels = all_labels[new_indexing[amount_of_training_data:2*amount_of_training_data]]     # Choose eval labels
 
     # Calculate the percentage of positive instances within the data
     per_of_positive_instances = round((sum(training_labels))/length(training_labels), digits = 2)
@@ -40,62 +30,51 @@ function main(epochs::Int64, batchsize::Int64, path_neur_1::Int64, path_neur_2::
     # Prepare training and evaluation data
     training_urls = url_to_mill.(training_lines, ngrams, prime, base)
     eval_urls = url_to_mill.(eval_lines, ngrams, prime, base)
+    # Construct additional parameters
+    additional_params = Additional_params(Int64(random_seed), prime, round(100/percentage_of_data))
 
-    # Construct struct of parameters
-    network_param = Network_params(random_seed, epochs, batchsize, prime, per_of_positive_instances, path_neur_1, path_neur_2, query_neur_1, query_neur_2, path_query_neur, 
-     round(100/percentage_of_data, digits = 2), lr, activs...,)
+    # Construct parameter combinations to search
+    par_comb = par_grid(ranges)     # Create a grid with possible values for each hyperparameter
+    training_params = Training_params.(par_comb)    # Convert ranges into structs
+    
+    # Grid search for hyperparameters
+    grid_search(training_urls, eval_urls, training_labels, eval_labels, training_params, additional_params)
 
     # Train model and get results on eval data
-    predicted_labels, params_of_model = train(training_urls, eval_urls, training_labels, eval_labels, network_param)
+    #predicted_labels, params_of_model = train(training_urls, eval_urls, training_labels, eval_labels, network_param)
 
     # Save results to a file
-    eval_mod.eval_model("Julia/Model_eval.txt", eval_labels .+ 1, predicted_labels, network_param)
+    #eval_mod.eval_model("Julia/Model_eval.txt", eval_labels .+ 1, predicted_labels, network_param)
 
     return nothing
 end
 
-struct Network_params
-    seed::Int64
-    epochs::Int64
-    batchsize::Int64
-    prime::Int64
-    positive_instances::Float64
-    path_neur_1::Int64
-    path_neur_2::Int64
-    query_neur_1::Int64
-    query_neur_2::Int64
-    path_query_neur::Int64
-    percentage_of_data::Float64
-    learning_rate::Float64
-    act_path_neur_1::String
-    act_path_neur_2::String
-    act_query_neur_1::String
-    act_query_neur_2::String
-    act_path_query_neur::String
-end
-
 # Struct that holds training parameters for grid search
-mutable struct Training_params
-    epochs::Float64
-    batchsize::Float64
-    path_neur_1::Float64
-    path_neur_2::Float64
-    query_neur_1::Float64
-    query_neur_2::Float64
-    learning_rate::Float64
+mutable struct Training_params{T<:Int64, S<:Float64}
+    epochs::T
+    batchsize::T
+    path_neur_1::T
+    path_neur_2::T
+    query_neur_1::T
+    query_neur_2::T
+    path_query_neur::T
+    learning_rate::S
 end
 # Outer constructor
 function Training_params(vec::Vector{Float64})
-    length(vec) == 7 || error("Input vector must have exactly 7 elements")
-    Training_params(vec...) #splatt the vector
+    if length(vec) != 8
+        error("Input vector must have exactly 8 elements")
+    end
+    ints = Int64.(vec[1:end-1])
+    floats = vec[end]
+    Training_params(ints..., floats) #splat the vector
 end
 
-struct Additional_params
-    seed::Int64
-    prime::Int64
-    percentage_of_data::Float64
+struct Additional_params{T<:Int64, S<:Float64}
+    seed::T
+    prime::T
+    percentage_of_data::S
 end
-
 
 # Takes in a URL as string and divides it, then creates bagnodes and finally a single product node for single URL
 function url_to_mill(input::String, ngrams::Int64, prime::Int64, base::Int64)::ProductNode
@@ -122,40 +101,70 @@ function url_to_mill(input::String, ngrams::Int64, prime::Int64, base::Int64)::P
 end
 
 # Transforms vector string[URL] into a BagNode
-function transform(input::Vector{String}, ngrams::Int64, prime::Int64, base::Int64)::BagNode
+function transform(input::Vector{String}, ngrams::Int64, prime::Int64, base::Int64, sparse = false)::BagNode
     # Check for empty path
     if isempty(input)
         input = [""]
     end
     matrix = Mill.NGramMatrix(input, ngrams, base, prime)    # Create NGramMatrix from the string
+    matrix = sparse ? SparseMatrixCSC(matrix) : matrix
     bn = Mill.BagNode(Mill.ArrayNode(matrix), [1:length(input)])     # NgramMatrix can act as ArrayNode data
     return bn
 end
 
-# Check if the present activation functions can be evaluated from the string - if they even exist
+# Check if the present activation functions can be evaluated from the string - if they even exist# Epochs, batchsize, path_neur1, path_neur_2, query_neur_1, query_neur_2, percentage, learning rate = 0.001,prime = 2053, ngrams = 3, base = 256
 function check_activation_func(str::String)::Nothing
     funcs = ["relu", "sigmoid", "tanh", "elu"]
     in(str, funcs) ? true : error("Incorrect activation function!")
     return nothing
 end
 
-function create_model(param::Network_params)::ProductModel
+# Struct for holding evaluation results of a model
+struct Evaluation
+    recall::Float64
+    precision::Float64
+    true_pos::Int64
+    false_pos::Int64
+    true_neg::Int64
+    false_neg::Int64
+    F_score::Float64
+end
+
+# Evaluate the performance of trained model
+function evaluate_performance(true_labels::Vector{Int64}, predicted_labels::Vector{Int64})::Evaluation
+
+    # Create consufion matrix
+    conf_matrix = confusmat(2, true_labels.+1, predicted_labels)
+
+    # Calculate precison 
+    precis = (conf_matrix[2,2])/(conf_matrix[2,2] + conf_matrix[1,2])
+
+    # Calculate recall
+    recal = (conf_matrix[2,2])/(conf_matrix[2,2] + conf_matrix[2,1])
+
+    # F_score
+    f_score = round(2 * (precis * recal)/(precis+recal), digits = 2)
+
+    return Evaluation(round(recal, digits = 2), round(precis, digits = 2), conf_matrix[1,1], conf_matrix[2,1], conf_matrix[2,2], conf_matrix[1,2], f_score)
+end
+
+# Create the model with specific parameters
+function create_model(param::Training_params, prime::Int64)::ProductModel
     mod = Mill.ProductModel(tuple(
-        Mill.BagModel(Mill.ArrayModel(Flux.Dense(param.prime => param.path_neur_1, bias = true, eval(Symbol(param.act_path_neur_1)))), 
-                      Mill.SegmentedMeanMax(param.path_neur_1), Flux.Dense(2*param.path_neur_1 => param.path_neur_2, bias = true, eval(Symbol(param.act_path_neur_2)))),
-        Mill.BagModel(Mill.ArrayModel(Flux.Dense(param.prime => param.query_neur_1, bias = true, eval(Symbol(param.act_query_neur_1)))), 
-                      Mill.SegmentedMeanMax(param.query_neur_1), Flux.Dense(2*param.query_neur_1=> param.query_neur_2, bias = true, eval(Symbol(param.act_query_neur_2))))
-                            ), Flux.Chain(Flux.Dense(param.path_neur_2 + param.query_neur_2 => param.path_query_neur, bias = true, eval(Symbol(param.act_path_query_neur))), Flux.Dense(param.path_query_neur=>2))
+        Mill.BagModel(Mill.ArrayModel(Flux.Dense(prime => param.path_neur_1, bias = true, elu)), 
+                      Mill.SegmentedMeanMax(param.path_neur_1), Flux.Dense(2*param.path_neur_1 => param.path_neur_2, bias = true, relu)),
+        Mill.BagModel(Mill.ArrayModel(Flux.Dense(prime => param.query_neur_1, bias = true, elu)), 
+                      Mill.SegmentedMeanMax(param.query_neur_1), Flux.Dense(2*param.query_neur_1=> param.query_neur_2, bias = true, relu))
+                            ), Flux.Chain(Flux.Dense(param.path_neur_2 + param.query_neur_2 => param.path_query_neur, bias = true, elu), Flux.Dense(param.path_query_neur=>2))
                             )
     return mod
 end
 
-# Basic train function ~ old
-function train(training_urls, eval_urls, training_labels::Vector{Int64}, eval_labels::Vector{Int64}, param::Network_params)::Tuple
+# Training function
+function train(training_urls::Vector{<:ProductNode}, eval_urls::Vector{<:ProductNode}, training_labels::Vector{Int64}, eval_labels::Vector{Int64}, param::Training_params{Int64}, prime::Int64)::Tuple 
     
     # Create model of the network
-    model = create_model(param)
-    #printtree(model)
+    model = create_model(param, prime) # What with the activation functions
 
     # Create a loss
     loss(ds, y) = Flux.Losses.logitbinarycrossentropy(model(ds), OneHotArrays.onehotbatch(y .+ 1, 1:2))  # Onehot inside from training labels
@@ -176,70 +185,7 @@ function train(training_urls, eval_urls, training_labels::Vector{Int64}, eval_la
     state = Dict("best_loss" => Inf, "no_improv" => 0, "patience"=> 2)
 
     # Early stopping callback
-    function early_stop_cb()
-        eval_loss = mean(loss(batch...) for batch in eval_data_loader)
-        println("procceded")
-        if eval_loss < state["best_loss"]
-            state["best_loss"] = eval_loss
-            state["no_improv"] = 0
-        else
-            state["no_improv"] += 1
-        end
-        return state["no_improv"] > state["patience"]
-    end
-    
-    # Callback
-    #early_stopping_cb = Flux.throttle(() -> Flux.early_stopping(early_stop_cb, state["patience"])(), 1)
-
-    # Training loop
-    for i in 1:param.epochs
-        Flux.Optimise.train!(loss, par, training_data_loader, opt)#, cb= early_stopping_cb) # That shouldn't be
-        @show acc(training_urls, training_labels)
-        # if i % 10 == 1
-        #     @show acc(training_urls, training_labels)
-        #     @show loss(training_urls, training_labels)
-        # end
-        if early_stop_cb()
-            println("Stop at epoch: $i")
-            break
-        end
-    end
-
-    @show acc(eval_urls, eval_labels)   # Show accuracy of the model
-    probs = softmax(model(eval_urls))   # Transform output into probabilities
-    o = Flux.onecold(probs)             # Transform back the probabilities into labels
-    # mn = mean(o .== eval_labels .+ 1)   # Calculate the mean of correct predictions
-    # println("Mean of correct predictions: ", mn)
-
-    return o, par
-end
-
-function train_grid(training_urls, eval_urls, training_labels::Vector{Int64}, eval_labels::Vector{Int64}, param::Training_params)::Tuple
-    
-    # Create model of the network
-    model = create_model(param) # What with the activation functions
-    #printtree(model)
-
-    # Create a loss
-    loss(ds, y) = Flux.Losses.logitbinarycrossentropy(model(ds), OneHotArrays.onehotbatch(y .+ 1, 1:2))  # Onehot inside from training labels
-
-    # Accuracy function
-    acc(ds, y) = Statistics.mean(Flux.onecold(model(ds)) .== y.+ 1)    # Reverse of Onehot back to pure labels from the output matrix and calculating the mean of correctly predicted labels
-
-    # Optimizer
-    opt = Flux.Optimiser(ClipValue(1e-3), Adam(1e-3))
-    par = Flux.params(model)    # Parameters of the model
-
-    # Create minibatches
-    training_data_loader = Flux.DataLoader((training_urls, training_labels), batchsize = param.batchsize, shuffle = true, partial = false)
-    eval_data_loader = Flux.DataLoader((eval_urls, eval_labels), batchsize = param.batchsize, shuffle = true, partial = false)
-
-    # Early stopping
-    # Stopping  criteria for training loop
-    state = Dict("best_loss" => Inf, "no_improv" => 0, "patience"=> 2)
-
-    # Early stopping callback
-    function early_stop_cb()
+    function early_stop_cb()::Bool
         eval_loss = mean(loss(batch...) for batch in eval_data_loader)
         if eval_loss < state["best_loss"]
             state["best_loss"] = eval_loss
@@ -251,63 +197,83 @@ function train_grid(training_urls, eval_urls, training_labels::Vector{Int64}, ev
     end
     
     # Callback
-    early_stopping_cb = Flux.throttle(() -> Flux.early_stopping(early_stop_cb, patience)(), 1)
+    #early_stopping_cb = Flux.throttle(() -> early_stop_cb, 1) #  Check every 3 seconds
 
+    stopped_at = false
     # Training loop
     for i in 1:param.epochs
-        Flux.Optimise.train!(loss, par, training_data_loader, opt, cb = early_stopping_cb) # That shouldn't be
-        # if i % 10 == 1
-        #     @show acc(training_urls, training_labels)
-        #     @show loss(training_urls, training_labels)
-        # end
+        Flux.Optimise.train!(loss, par, training_data_loader, opt)
         if early_stop_cb()
+            stopped_at = true
             println("Stop at epoch: $i")
             break
         end
     end
 
-    #@show acc(eval_urls, eval_labels)   # Show accuracy of the model
     probs = softmax(model(eval_urls))   # Transform output into probabilities
     o = Flux.onecold(probs)             # Transform back the probabilities into labels
     # mn = mean(o .== eval_labels .+ 1)   # Calculate the mean of correct predictions
     # println("Mean of correct predictions: ", mn)
 
-    return o, par
+    # Return predicted labels and trained model
+    return o, model, stopped_at
 end
 
-"""
-Create a CSV file ~ like a database -> use DataFrame structure, or SQL?
-Save individual outputs of grid_search into separate files
+# Create Grid to grid_search from ranges
+function par_grid(X::Vector{<:AbstractRange})::Vector{Vector{Float64}}
+    # Create the Cartesian product to form the grid
+    grid = Iterators.product(X...)
 
+    # Map each tuple in the grid to a vector and collect these vectors into a single vector
+    vector_of_vectors = [collect(t) for t in grid]
 
-"""
-
-function grid_search()
-    activs = ["elu", "relu", "relu", "relu", "relu"] 
-    act = [Flux.activations.relu]
-    # Create an order of activation functions to try, then create a specific range from numbers 1-#of activation functions
-    
-    parameters = ParameterGrid([[1,10,5], [20,30,5], [20,30,5], [20,30,5], [20,30,5], [20,30,5], [20,30,5]])
-    structs = Training_params.(parameters)
-    add_params = Additional_params(1,1,1.0)
-    # USE pmap with Distributed
-    #train(...)
-    #permormance_val = eval_mod.evaluate_performance(true_labels, predicted_labels)
-    #performances = pmap((x...)-> train
-
-
-    # Save results into separate files using this
-    #save("mod_params.jld2", "Network_params", "a", "Additional_params", "a", "Performance_metrics", "met", "model", "mod")
-
+    return vec(vector_of_vectors) # transform to a vector
 end
-#grid_search()
+
+function grid_search(training_urls::Vector{<:ProductNode}, eval_urls::Vector{<:ProductNode}, training_lables::Vector{Int64}, eval_labels::Vector{Int64}, training_param::Vector{Training_params{Int64, Float64}}, additional_param::Additional_params)::Nothing
+    ln = length(training_param)     # Number of combinations of parameters
+    # Construct a DataFrame, preallocating space for all parameters combinations
+    df = DataFrame(Epochs = Vector{Int64}(undef, ln), 
+                   Stopped = Vector{Bool}(undef, ln), 
+                   Batchsize = Vector{Int64}(undef, ln),
+                   Path_neur_1 = Vector{Int64}(undef, ln),
+                   Path_neur_2 = Vector{Int64}(undef, ln),
+                   Query_neur_1 = Vector{Int64}(undef, ln),
+                   Query_neur_2 = Vector{Int64}(undef, ln),
+                   Path_Query_neur = Vector{Int64}(undef, ln),
+                   Learning_rate = Vector{Float64}(undef, ln),
+                   Precision = Vector{Float64}(undef, ln),
+                   Recall = Vector{Float64}(undef, ln),
+                   F_score = Vector{Float64}(undef, ln)
+    )
+
+    # Cycle for searching the grid
+    @inbounds for i in 1:length(training_param)
+        predicted_labels, model, stopped = train(training_urls, eval_urls, training_lables, eval_labels, training_param[i], additional_param.prime)   # train the network
+        evaluation_metric = evaluate_performance(eval_labels, predicted_labels)    # Evaluate  performance with current network
+        filename = "$(training_param[i].epochs)_$(training_param[i].batchsize)_$(training_param[i].learning_rate)_$(training_param[i].path_neur_1)_$(training_param[i].path_neur_2)_$(training_param[i].query_neur_1)_$(training_param[i].query_neur_2)_$(training_param[i].path_query_neur)"   # Construct filename
+        save("Julia/Results/$filename.jld2", "Evaluation_metrics", evaluation_metric, "Training_params", training_param[i],"Additional_params", additional_param, "Model", model)   # Save the current network and its parameters
+
+        # Save results in a DataFrame
+        df.Epochs[i] = training_param[i].epochs
+        df.Batchsize[i] = training_param[i].batchsize
+        df.Stopped[i] = stopped
+        df.Path_neur_1[i] = training_param[i].path_neur_1
+        df.Path_neur_2[i] = training_param[i].path_neur_2
+        df.Query_neur_1[i] = training_param[i].query_neur_1
+        df.Query_neur_2[i] = training_param[i].query_neur_2
+        df.Path_Query_neur[i] = training_param[i].path_query_neur
+        df.Learning_rate[i] = training_param[i].learning_rate 
+        df.Precision[i] = evaluation_metric.precision
+        df.Recall[i] = evaluation_metric.recall
+        df.F_score[i] = evaluation_metric.F_score
+    end
+    CSV.write("Julia/Results/all_results.csv", df)  # Save the DataFrame to a CSV file
+    return nothing
+end
 
 
-activs = ["relu", "relu", "relu", "relu", "relu"]
-# Epochs, batchsize, path_neur1, path_neur_2, query_neur_1, query_neur_2, percentage, learning rate = 0.001,prime = 2053, ngrams = 3, base = 256
-main(40, 32, 16, 16, 256, 128, 64, activs, 10/8, 0.001)
+# epochs, batchise, path_neur_1, path_neur_2, query_neur_1, query_neur_2, path_query_neur, learning_rate
+ranges = [10:10:20,  16:20:32, 16:1:16, 16:1:16, 256:1:256, 128:1:128, 64:1:64, 0.001:0.001:0.001]
+main(ranges)
 
-# acc = [0.7, 0.8, 0.75, 0.9, 0.7]
-# vss = [7, 16, 32, 64, 128]
-
-# eval_mod.plot_acc_vs(acc, vss)
