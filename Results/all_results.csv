@@ -1,0 +1,2 @@
+Epochs,Stopped,Batchsize,Path_neur_1,Path_neur_2,Query_neur_1,Query_neur_2,Path_Query_neur,Learning_rate,Precision,Recall,F_score
+20,true,32,32,16,256,128,64,0.001,1.0,0.99,1.0

@@ -2,11 +2,16 @@ using Revise
 using Mill, HTTP, JLD2, Random, OneHotArrays, Flux, Statistics, IterTools, DataFrames, CSV, MLBase, SparseArrays
 
 
-function main(ranges::Vector{<:AbstractRange}, percentage_of_data::Float64=0.005, prime::Int64=2053, ngrams::Int64=3, base::Int64=256)::Nothing
+function main(ranges::Vector{<:AbstractRange}, percentage_of_data::Float64=0.1, prime::Int64=2053, ngrams::Int64=3, base::Int64=256)::Nothing
 
     # Read lines
-    all_urls = JLD2.load("Julia/Lines/new_combined_lines.jld2", "lines")     #  Load URL addresses
-    all_labels = JLD2.load("Julia/Lines/shuffled_labels.jld2", "labels_vector")      # Load labels for URLs
+    #all_urls = JLD2.load("Julia/Lines/new_combined_lines.jld2", "lines")     #  Load URL addresses
+    #all_labels = JLD2.load("Julia/Lines/shuffled_labels.jld2", "labels_vector")      # Load labels for URLs
+    
+    all_urls = JLD2.load("new_mixed_urls.jld2", "vec_urls")     #  Load URL addresses
+    all_labels = JLD2.load("new_mixed_labels.jld2", "vec_lab")      # Load labels for URLs
+    # println(all_urls[1:100])
+    # println(all_labels[1:100])
 
     # Generate random number every time
     random_seed = rand(UInt32)
@@ -25,6 +30,7 @@ function main(ranges::Vector{<:AbstractRange}, percentage_of_data::Float64=0.005
     per_of_positive_instances = round((sum(training_labels))/length(training_labels), digits = 2)
     println("Percentage of positive urls within the training lines: ", per_of_positive_instances)
     println("Percentage of positive urls within the eval lines: ", sum(eval_labels)/length(eval_labels))
+    println("Number of instances within evaluation data: ", length(eval_labels))
     println("Number of positive urls within eval data: ", sum(eval_labels))
 
     # Prepare training and evaluation data
@@ -94,7 +100,12 @@ function url_to_mill(input::String, ngrams::Int64, prime::Int64, base::Int64)::P
     query = String.(split(query,"&"))
 
     # Will not be including host into the product node, since it is the same for all url withing the training set
-    model = Mill.ProductNode((transform(path, ngrams, prime, base), 
+    # model = Mill.ProductNode((transform(path, ngrams, prime, base), 
+    #                          transform(query, ngrams, prime, base)
+    #                             ))
+
+    model = Mill.ProductNode((transform(host,ngrams, prime, base),
+                             transform(path, ngrams, prime, base), 
                              transform(query, ngrams, prime, base)
                                 ))
     return model
@@ -182,11 +193,12 @@ function train(training_urls::Vector{<:ProductNode}, eval_urls::Vector{<:Product
 
     # Early stopping
     # Stopping  criteria for training loop
-    state = Dict("best_loss" => Inf, "no_improv" => 0, "patience"=> 2)
+    state = Dict("best_loss" => Inf, "no_improv" => 0, "patience"=> 10)
 
     # Early stopping callback
     function early_stop_cb()::Bool
         eval_loss = mean(loss(batch...) for batch in eval_data_loader)
+        println(acc(eval_urls, eval_labels))
         if eval_loss < state["best_loss"]
             state["best_loss"] = eval_loss
             state["no_improv"] = 0
@@ -212,8 +224,6 @@ function train(training_urls::Vector{<:ProductNode}, eval_urls::Vector{<:Product
 
     probs = softmax(model(eval_urls))   # Transform output into probabilities
     o = Flux.onecold(probs)             # Transform back the probabilities into labels
-    # mn = mean(o .== eval_labels .+ 1)   # Calculate the mean of correct predictions
-    # println("Mean of correct predictions: ", mn)
 
     # Return predicted labels and trained model
     return o, model, stopped_at
@@ -274,6 +284,6 @@ end
 
 
 # epochs, batchise, path_neur_1, path_neur_2, query_neur_1, query_neur_2, path_query_neur, learning_rate
-ranges = [10:10:20,  16:20:32, 16:1:16, 16:1:16, 256:1:256, 128:1:128, 64:1:64, 0.001:0.001:0.001]
+ranges = [20:10:20,  32:33:64, 32:1:32, 16:1:16, 256:1:256, 128:1:128, 64:1:64, 0.001:0.001:0.001]
 main(ranges)
 
