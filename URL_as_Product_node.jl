@@ -1,5 +1,5 @@
 using Revise
-using Mill, HTTP, JLD2, Random, OneHotArrays, Flux, Statistics, IterTools, DataFrames, CSV, SparseArrays, Plots
+using Mill, HTTP, JLD2, Random, OneHotArrays, Flux, IterTools, DataFrames, CSV, SparseArrays, Plots, Statistics
 
 
 function main(ranges::Vector{Vector{Float64}}, amount_of_urls_to_use::Int64, percentage_of_data::Float64=0.6, prime::Int64=2053, ngrams::Int64=3, base::Int64=256)::Nothing
@@ -222,16 +222,16 @@ function create_model(param::Training_params, prime::Int64)::ProductModel
     #                         ), Flux.Chain(Flux.Dense(2*(param.domain_neur_2 + param.path_neur_2 + param.query_neur_2) => param.path_query_neur, bias = true, elu), Flux.Dense(param.path_query_neur=>Int(param.path_query_neur/2),bias=true, elu), Flux.Dense(Int(param.path_query_neur/2)=>2, bias = true, relu)))
 
     mod = Mill.ProductModel(tuple(
-        Mill.BagModel(Mill.ArrayModel(Flux.Chain(Flux.Dense(prime=>param.domain_neur_1, bias = true, elu), Flux.Dense(param.domain_neur_1=>param.domain_neur_2, bias = true, elu))), 
-                      Mill.SegmentedPNorm(param.domain_neur_2), ),
+        Mill.BagModel(Mill.ArrayModel(Flux.Chain(Flux.Dense(prime=>param.domain_neur_1, bias = true, selu), Flux.Dense(param.domain_neur_1=>param.domain_neur_2, bias = true, selu))), 
+                      Mill.SegmentedPNormLSE(param.domain_neur_2), ),
 
-        Mill.BagModel(Mill.ArrayModel(Flux.Chain(Flux.Dense(prime => param.path_neur_1, bias = true, elu), Flux.Dense(param.path_neur_1=> param.path_neur_2, bias=true, elu)) ),  #
-                      Mill.SegmentedPNorm(param.path_neur_2), ),
+        Mill.BagModel(Mill.ArrayModel(Flux.Chain(Flux.Dense(prime => param.path_neur_1, bias = true, selu), Flux.Dense(param.path_neur_1=> param.path_neur_2, bias=true, selu)) ),  #
+                      Mill.SegmentedPNormLSE(param.path_neur_2), ),
                       
-        Mill.BagModel(Mill.ArrayModel(Flux.Chain(Flux.Dense(prime => param.query_neur_1, bias = true, elu), Flux.Dense(param.query_neur_1=> param.query_neur_2, bias=true, elu))), 
-                      Mill.SegmentedPNorm(param.query_neur_2), )
+        Mill.BagModel(Mill.ArrayModel(Flux.Chain(Flux.Dense(prime => param.query_neur_1, bias = true, selu), Flux.Dense(param.query_neur_1=> param.query_neur_2, bias=true, selu))), 
+                      Mill.SegmentedPNormLSE(param.query_neur_2), )
 
-                            ), Flux.Chain(Flux.Dense((param.domain_neur_2 + param.path_neur_2 + param.query_neur_2) => param.path_query_neur, bias = true, elu), Flux.Dense(param.path_query_neur=>Int(param.path_query_neur/2),bias=true, elu), Flux.Dense(Int(param.path_query_neur/2)=>2, bias = true, relu)))
+                            ), Flux.Chain(Flux.Dense(2*(param.domain_neur_2 + param.path_neur_2 + param.query_neur_2) => param.path_query_neur, bias = true, selu), Flux.Dense(param.path_query_neur=>Int(param.path_query_neur/2),bias=true, selu), Flux.Dense(Int(param.path_query_neur/2)=>2, bias = true, selu)))
 
     printtree(mod)
     return mod
@@ -256,7 +256,7 @@ function train(training_urls::Vector{<:ProductNode}, eval_urls::Vector{<:Product
    
     # Early stopping
     # Stopping  criteria for training loop
-    state = Dict("best_loss" => Inf, "no_improv" => 0, "patience"=> 4)
+    state = Dict("best_loss" => Inf, "no_improv" => 0, "patience"=> 2)
 
     opt_state = Flux.setup(Adam(param.learning_rate), model)
 
@@ -417,10 +417,10 @@ end
 #ranges = [[40],  ct(POT(64,256)), ct(POT(1024,1024)), ct(POT(256,512)), ct(POT(1024,1024)),  ct(POT(256,512)) , ct(POT(1024,1024)), ct(POT(256,512)), ct(POT(512,1024)), [0.001, 0.005]]
 
 #ranges = [[20],  ct(POT(32,128)), ct(POT(512,1024)), ct(POT(64,128)), ct(POT(512,1024)),  ct(POT(64,128)), ct(POT(512,1024)), ct(POT(64,128)), ct(POT(256,256)), [0.001]]
-ranges = [[15],  ct(POT(128,128)), ct(POT(1024,1024)), ct(POT(512,512)), ct(POT(1024,1024)),  ct(POT(512,512)), ct(POT(1024,1024)), ct(POT(512,512)), ct(POT(512,512)), [0.05]]
+ranges = [[15],  ct(POT(64,64)), ct(POT(1024,1024)), ct(POT(512,512)), ct(POT(1024,1024)),  ct(POT(512,512)), ct(POT(1024,1024)), ct(POT(512,512)), ct(POT(512,512)), [0.001]]
 
 
 #println(size(par_grid(ranges)))
 
-main(ranges, 5000)
+main(ranges, 50000)
 
