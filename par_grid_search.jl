@@ -1,11 +1,11 @@
 using Revise
-using  HTTP, Random, Statistics, IterTools, Distributed
-addprocs(2)
+using  HTTP, Random, IterTools, Distributed, JLD2
+#addprocs(2)
 
 
 @everywhere begin
-    using Mill, OneHotArrays, Flux, Statistics, DataFrames, CSV, SparseArrays, Plots, JLD2
-    file_lock = ReentrantLock()
+    using Mill, OneHotArrays, Flux, Statistics, DataFrames, CSV, SparseArrays
+    #file_lock = ReentrantLock()
 end
 
 function main(ranges::Vector{Vector{Float64}}, amount_of_urls_to_use::Int64, percentage_of_data::Float64=0.6, prime::Int64=2053, ngrams::Int64=3, base::Int64=256)::Nothing
@@ -23,6 +23,8 @@ function main(ranges::Vector{Vector{Float64}}, amount_of_urls_to_use::Int64, per
     all_urls = JLD2.load("final_mix_urls.jld2", "all_urls")[new_indexing]    #  Load URL addresses
     all_labels = JLD2.load("final_mix_labels.jld2", "all_labels")[new_indexing]    # Load labels for URLs
 
+    println(sum(all_labels)/lenght(all_labels))
+    println(a)
     # Create the training data and the evaluation data 
     training_lines = all_urls[new_indexing[1:amount_of_training_data]]      # Choose training lines
     training_labels = all_labels[new_indexing[1:amount_of_training_data]]     # Choose training labels
@@ -49,7 +51,7 @@ function main(ranges::Vector{Vector{Float64}}, amount_of_urls_to_use::Int64, per
     additional_params = Additional_params(Int64(random_seed), prime, round(100/percentage_of_data))
 
     # Construct parameter combinations to search
-    par_comb = par_grid(ranges)     # Create a grid with possible values for each hyperparameter
+    par_comb = filter_grid(par_grid(ranges))     # Create a grid with possible values for each hyperparameter
     training_params = Training_params.(par_comb)    # Convert ranges into structs
 
     # Grid search for hyperparameters
@@ -70,17 +72,17 @@ end
     query_neur_2::T
     path_query_neur::T
     learning_rate::S
+    treshold::S
 end
 # Outer constructor
 @everywhere function Training_params(vec::Vector{Float64})
-    if length(vec) != 10
+    if length(vec) != 11
         error("Input vector must have exactly 8 elements")
     end
-    ints = Int64.(vec[1:end-1])
-    floats = vec[end]
-    Training_params(ints..., floats)
+    ints = Int64.(vec[1:end-2])
+    floats = vec[end-1:end]
+    Training_params(ints..., floats...)
 end
-
 # Structure that holds additional parameters for grid search
 @everywhere struct Additional_params{T<:Int64, S<:Float64}
     seed::T
@@ -202,74 +204,53 @@ end
 
 # Create the model with specific parameters
 @everywhere function create_model(param::Training_params, prime::Int64)::ProductModel                          
-    # mod = Mill.ProductModel(tuple(
-    #     Mill.BagModel(Mill.ArrayModel(Flux.Chain(Flux.Dense(prime=>param.domain_neur_1, bias = true, elu), Flux.Dense(param.domain_neur_1=>Int(param.domain_neur_1/2), bias = true, elu), Flux.Dense(Int(param.domain_neur_1/2)=>param.domain_neur_2, bias = true, elu))), 
-    #                   Mill.SegmentedMean(param.domain_neur_2), Flux.Chain(Flux.Dense(param.domain_neur_2=> Int(param.domain_neur_2/2), bias = true, elu), Flux.Dense(Int(param.domain_neur_2/2)=>Int(param.domain_neur_2/4), bias = true, elu))),
 
-    #     Mill.BagModel(Mill.ArrayModel(Flux.Chain(Flux.Dense(prime => param.path_neur_1, bias = true, elu), Flux.Dense(param.path_neur_1=> Int(param.path_neur_1/2), bias=true, elu), Flux.Dense(Int(param.path_neur_1/2) => param.path_neur_2, bias = true, elu)) ),  #
-    #                   Mill.SegmentedMean(param.path_neur_2), Flux.Chain(Flux.Dense(param.path_neur_2 => Int(param.path_neur_2/2), bias = true, elu), Flux.Dense(Int(param.path_neur_2/2)=>Int(param.path_neur_2/4), bias =true, elu))),
-                      
-    #     Mill.BagModel(Mill.ArrayModel(Flux.Chain(Flux.Dense(prime => param.query_neur_1, bias = true, elu), Flux.Dense(param.query_neur_1=> Int(param.query_neur_1/2), bias=true, elu), Flux.Dense(Int(param.query_neur_1/2)=>param.query_neur_2, bias = true, elu))), 
-    #                   Mill.SegmentedMean(param.query_neur_2), Flux.Chain(Flux.Dense(param.query_neur_2 => Int(param.query_neur_2/2), bias = true, elu), Flux.Dense(Int(param.query_neur_2/2)=>Int(param.query_neur_2/4), bias = true, elu)))
+    mod = ProductModel(tuple(
+        BagModel(ArrayModel(Flux.Chain( Dense(prime=>prime, gelu), Dropout(0.6), Dense(prime=>param.domain_neur_1), BatchNorm(param.domain_neur_1), x->gelu(x), Dense(param.domain_neur_1=>param.domain_neur_2, gelu), BatchNorm(param.domain_neur_2))),
+            AggregationStack(SegmentedMean(param.domain_neur_2), SegmentedSum(param.domain_neur_2))),
 
-    #                         ), Flux.Chain(Flux.Dense(Int(param.domain_neur_2/ 4) + Int(param.path_neur_2/4) + Int(param.query_neur_2/4) => 64, bias = false, elu), Flux.Dense(64=>32,bias=false, elu), Flux.Dense(32=>2, bias = false, relu)))
+        BagModel(ArrayModel(Flux.Chain( Dense(prime=>prime, gelu), Dropout(0.6), Dense(prime=>param.path_neur_1), BatchNorm(param.path_neur_1), x->gelu(x), Dense(param.path_neur_1=>param.path_neur_2, gelu), BatchNorm(param.path_neur_2))),
+            AggregationStack(SegmentedMean(param.path_neur_2), SegmentedSum(param.path_neur_2))),
 
+        BagModel(ArrayModel(Flux.Chain( Dense(prime=>prime, gelu), Dropout(0.6), Dense(prime=>param.query_neur_1), BatchNorm(param.query_neur_1), x->gelu(x), Dense(param.query_neur_1=>param.query_neur_2, gelu), BatchNorm(param.query_neur_2))),
+            AggregationStack(SegmentedMean(param.query_neur_2), SegmentedSum(param.query_neur_2))),
+            
+        ),
+        Flux.Chain(BatchNorm(2*(param.domain_neur_2+param.path_neur_2+param.query_neur_2)), Dense(2*(param.domain_neur_2+param.path_neur_2+param.query_neur_2)=>2*(param.domain_neur_2+param.path_neur_2+param.query_neur_2), gelu), Dropout(0.45),
+        Dense(2*(param.domain_neur_2+param.path_neur_2+param.query_neur_2)=>param.path_query_neur), BatchNorm(param.path_query_neur), x->gelu(x),  Dense(param.path_query_neur=>2, gelu)
+        ))
 
-    #  mod = Mill.ProductModel(tuple(
-    #     Mill.BagModel(Mill.ArrayModel(Flux.Chain(Flux.Dense(prime=>param.domain_neur_1, bias = true, elu), Flux.Dense(param.domain_neur_1=>param.domain_neur_2, bias = true, elu))), 
-    #                   Mill.SegmentedMeanMax(param.domain_neur_2), ),
-
-    #     Mill.BagModel(Mill.ArrayModel(Flux.Chain(Flux.Dense(prime => param.path_neur_1, bias = true, elu), Flux.Dense(param.path_neur_1=> param.path_neur_2, bias=true, elu)) ),  #
-    #                   Mill.SegmentedMeanMax(param.path_neur_2), ),
-                      
-    #     Mill.BagModel(Mill.ArrayModel(Flux.Chain(Flux.Dense(prime => param.query_neur_1, bias = true, elu), Flux.Dense(param.query_neur_1=> param.query_neur_2, bias=true, elu))), 
-    #                   Mill.SegmentedMeanMax(param.query_neur_2), )
-
-    #                         ), Flux.Chain(Flux.Dense(2*(param.domain_neur_2 + param.path_neur_2 + param.query_neur_2) => param.path_query_neur, bias = true, elu), Flux.Dense(param.path_query_neur=>Int(param.path_query_neur/2),bias=true, elu), Flux.Dense(Int(param.path_query_neur/2)=>2, bias = true, relu)))
-
-    mod = Mill.ProductModel(tuple(
-        Mill.BagModel(Mill.ArrayModel(Flux.Chain(Flux.Dense(prime=>param.domain_neur_1, bias = true, swish), Flux.Dense(param.domain_neur_1=>param.domain_neur_2, bias = true, swish))), 
-                      Mill.SegmentedMeanMax(param.domain_neur_2), ),
-
-        Mill.BagModel(Mill.ArrayModel(Flux.Chain(Flux.Dense(prime => param.path_neur_1, bias = true, swish), Flux.Dense(param.path_neur_1=> param.path_neur_2, bias=true, swish)) ),  #
-                      Mill.SegmentedMeanMax(param.path_neur_2), ),
-                      
-        Mill.BagModel(Mill.ArrayModel(Flux.Chain(Flux.Dense(prime => param.query_neur_1, bias = true, swish), Flux.Dense(param.query_neur_1=> param.query_neur_2, bias=true, swish))), 
-                      Mill.SegmentedMeanMax(param.query_neur_2), )
-
-                            ), Flux.Chain(Flux.Dense(2*(param.domain_neur_2 + param.path_neur_2 + param.query_neur_2) => param.path_query_neur, bias = true, swish), Flux.Dense(param.path_query_neur=>Int(param.path_query_neur/2),bias=true, swish), Flux.Dense(Int(param.path_query_neur/2)=>2, bias = true, swish)))
-
-    #printtree(mod)
     return mod
 end
 
 # Training function
-@everywhere function train(training_urls::Vector{<:ProductNode}, eval_urls::Vector{<:ProductNode}, valid_urls::Vector{<:ProductNode}, training_labels::Vector{Int64}, eval_labels::Vector{Int64}, valid_labels::Vector{Int64}, param::Training_params{Int64}, prime::Int64)::Tuple 
+@everywhere function train(training_urls::Vector{<:ProductNode}, eval_urls::Vector{<:ProductNode}, valid_urls::Vector{<:ProductNode}, training_labels::Vector{Int64}, valid_labels::Vector{Int64}, param::Training_params{Int64}, prime::Int64)::Tuple 
 
     # Create model of the network
     model = create_model(param, prime) # What with the activation functions
     
     # Create a loss
-    # loss(ds, y) = Flux.Losses.logitbinarycrossentropy(model(ds), OneHotArrays.onehotbatch(y .+ 1, 1:2))  # Onehot inside from training labels
     loss(x, y) = Flux.Losses.logitbinarycrossentropy(x, OneHotArrays.onehotbatch(y .+ 1, 1:2))  # Onehot inside from training labels
-
-    # Accuracy function
-    #acc(ds, y) = Statistics.mean(Flux.onecold(model(ds)) .== y.+ 1)    # Reverse of Onehot back to pure labels from the output matrix and calculating the mean of correctly predicted labels
 
     # Create minibatches
     training_data_loader = Flux.DataLoader((training_urls, training_labels), batchsize = param.batchsize, shuffle = true, partial = false)
     valid_data_loader = Flux.DataLoader((valid_urls, valid_labels), batchsize = param.batchsize, shuffle = true, partial = false)
-   
+
+
     # Early stopping
     # Stopping  criteria for training loop
-    state = Dict("best_loss" => Inf, "no_improv" => 0, "patience"=> 4)
+    state = Dict("best_loss" => Inf, "no_improv" => 0, "patience"=> 3)
 
-    opt_state = Flux.setup(Adam(param.learning_rate), model)
+    opt = Flux.Optimiser(Adam(param.learning_rate))
+    opt_state = Flux.setup(opt, model)
+
+    #println(a)
 
     # Early stopping callback
     function early_stop_cb()::Bool
         eval_loss = mean(loss(model(batch[1]), batch[2]) for batch in valid_data_loader)
         println(eval_loss)
+        println(state["no_improv"])
         if eval_loss < state["best_loss"]
             state["best_loss"] = eval_loss
             state["no_improv"] = 0
@@ -281,10 +262,11 @@ end
 
     stopped_at = false  # Early stop signalizer
 
+    trainmode!(model)
     # Training loop
     for i in 1:param.epochs
-        #losses = Float32[] # losses ob batches
-
+        @info "Epoch number $i."
+        is_finite = true
         # Batch work
         for (x_batch, y_batch) in training_data_loader
 
@@ -298,24 +280,39 @@ end
 
             # Check for valid loss value
             if !isfinite(val)
-                @warn "Loss is $val."
-                continue
+                @warn "Loss is $val." 
+                is_finite = false # Remark the loss
+                break
+    
             end
-
-             # Update the parameters of the model (grads[1] is a nested set of NamedTuples)
+           
+            #println(sum(model.ms[3].im.m.layers[3].weight))
+            # Update the parameters of the model (grads[1] is a nested set of NamedTuples)
             Flux.update!(opt_state, model, grads[1])
         end
-        
-        # Early stopping
-        if early_stop_cb()
+         # Early stopping
+         if early_stop_cb()
             stopped_at = true
+            break
+        end
+        # Control finite loss
+        if !is_finite
+            println("Loss is not finite at epoch $i.")
             break
         end
     end
 
+    testmode!(model) # Turn off dropout
 
+    println("Permormace on the training set:")
+    train_probs = softmax(model(training_urls))[1,1:end]
+    training_predicted = cold_treshold(train_probs, param.treshold)
+    training_metric = evaluate_performance(training_labels, training_predicted)
+    println("----------------")
+
+    #println(softmax(model(eval_urls[1:50])))
     probs = softmax(model(eval_urls))[1,1:end]   # Transform output into probabilities
-    
+
     # Return probabilities and trained model and if early early stopping occured
     return probs, model, stopped_at
 end
@@ -325,90 +322,88 @@ end
     return map(x-> x <= treshold ? 1 : 0, probs)
 end
 
-# Calculte the roc curve and pr curve, both are saved
-@everywhere function roc(probs::Vector{Float32}, true_labels::Vector{Int64}, filename::String)::Nothing
-    treshold_range = 0.0:0.01:1.0    # Treshold range of values
-    predicted_labels = map(x-> cold_treshold(probs, x), treshold_range)     # Vector of vectors of predicted labels for each treshold    
-    tpr, fpr, prec = tpr_fpr(predicted_labels, true_labels)
+# Create a channel for asyn. writing
+@everywhere channel = RemoteChannel(()->Channel{DataFrame}(10))
 
-    # Plot the ROC curve
-    roc_curve = plot(fpr, tpr, label="ROC Curve", xlabel="False Positive Rate", ylabel="True Positive Rate", legend=:bottomright)
-    plot!(roc_curve,[0, 1], [0, 1], label="Random Classifier", linestyle=:dash)
-    savefig(roc_curve, "ROC/" * filename * "_roc.pdf")
-
-    # Plot the PR curve
-    pr_curve = plot(tpr, prec, label="Precision/Recall Curve", xlabel="Recall", ylabel="Precision", legend=:bottomright, xlims=(0,1), ylims=(0,1))
-    hline!(pr_curve, [0.5], label="Baseline Classifier", linestyle=:dash)
-    savefig(pr_curve, "PR/" * filename * "_pr.pdf")
-    return nothing
+# Logger that controls takes results from the channel and call the append function to write into a CSV file
+function result_logger(channel)
+    println("Logger active")
+    try 
+        while isopen(channel) || isready(channel) # Condition on running the writing from channel
+            try
+                if isready(channel)
+                    data = take!(channel);
+                    println("Data received.");  
+                    append_data_to_csv(data);
+                else
+                    sleep(0.1)
+                end
+            catch e
+                println("Error processing data: $e")  # Error handling
+            end
+        end
+    catch e
+        println("Error in logger: $e")  # Error handling
+    finally
+        println("Logger closed")
+    end
 end
 
-# Calculate the tpr, fpr and precision
-@everywhere function tpr_fpr(x::Vector{Vector{Int64}}, true_labels::Vector{Int64})::Tuple
-    matricies = map(m->confusion_matrix(true_labels, m), x)
-    tpr = zeros(Float64, length(x))
-    fpr = zeros(Float64, length(x))
-    prec = zeros(Float64, length(x))
-    for i in 1:length(x)
-        tpr[i] = matricies[i][1,1]/(matricies[i][1,1] + matricies[i][2,1]) # recall
-        fpr[i] = matricies[i][1,2]/(matricies[i][1,2] + matricies[i][2,2])
-        prec[i] = matricies[i][1,1]/(matricies[i][1,1] + matricies[i][1,2]) # precision
+# Append data into a CSV file 
+function append_data_to_csv(data)
+    filename = "results_par_7.csv"
+    #df = DataFrame(data, column_names)
+    if isfile(filename)
+        CSV.write(filename, data, append= true)
+    else
+        CSV.write(filename, data)
     end
-    return tpr, fpr, prec
 end
 
 # Performs grid search and writes eval data into a csv file
 @everywhere function grid_search(training_urls::Vector{<:ProductNode}, eval_urls::Vector{<:ProductNode}, valid_urls::Vector{<:ProductNode}, training_labels::Vector{Int64}, eval_labels::Vector{Int64}, valid_labels::Vector{Int64}, training_param::Vector{Training_params{Int64, Float64}}, additional_param::Additional_params)::Nothing
-
+    @async result_logger(channel)
     # Cycle for searching the grid
-    @distributed for i in 1:length(training_param)
-        probs, model, stopped = train(training_urls, eval_urls, valid_urls, training_labels, eval_labels, valid_labels, training_param[i], additional_param.prime)   # train the network
-        predicted_labels = cold_treshold(probs)     # Convert probabilities to labels based on treshold
+    @sync @distributed for i in 1:length(training_param)
+        probs, model, stopped = train(training_urls, eval_urls, valid_urls, training_labels, valid_labels, training_param[i], additional_param.prime)   # train the network
+        predicted_labels = cold_treshold(probs, training_param[i].treshold)     # Convert probabilities to labels based on treshold
         evaluation_metric = evaluate_performance(eval_labels, predicted_labels)    # Evaluate  performance with current network
 
-       
-        
-        # Create a row in the data frame for the current iteration
+        # Construct data to be logged
         data = DataFrame(Epochs = ["$(training_param[i].epochs)"], 
-                        Stopped = ["$(stopped)"],
-                        Batchsize = ["$(training_param[i].batchsize)"],
-                       Domain_neur_1 = ["$(training_param[i].domain_neur_1)"],
-                       Domain_neur_2 = ["$(training_param[i].domain_neur_2)"],
-                       Path_neur_1 = ["$(training_param[i].path_neur_1)"],
-                       Path_neur_2 = ["$(training_param[i].path_neur_2)"],
-                       Query_neur_1 = ["$(training_param[i].query_neur_1)"],
-                       Query_neur_2 = ["$(training_param[i].query_neur_2)"],
-                       Path_Query_neur = ["$(training_param[i].path_query_neur)"],
-                       Learning_rate = ["$(training_param[i].learning_rate)"],
-                       Precision = ["$(evaluation_metric.precision)"],
-                       Recall = ["$(evaluation_metric.recall)"],
-                       F_score = ["$(evaluation_metric.F_score)"],
-                       Mathews = ["$(evaluation_metric.Mathew)"],
-                       TP = ["$(evaluation_metric.true_pos)"],
-                       FP = ["$(evaluation_metric.false_pos)"],
-                       FN = ["$(evaluation_metric.false_neg)"],
-                       TN =["$(evaluation_metric.true_neg)"])
-                       
-        
-        lock(file_lock)
-        try
-            CSV.write("results.csv", data, append= true)
-            
-             # Check if the model is "better"
-            if evaluation_metric.Mathew > 0.55
-                filename = "$(training_param[i].epochs)_$(training_param[i].batchsize)_$(training_param[i].learning_rate)_$(training_param[i].domain_neur_1)_$(training_param[i].domain_neur_2)_$(training_param[i].path_neur_1)_$(training_param[i].path_neur_2)_$(training_param[i].query_neur_1)_$(training_param[i].query_neur_2)_$(training_param[i].path_query_neur)"   # Construct filename
-                roc(probs, eval_labels, filename)   # Calculate the ROC and PR curves and save them into a pdf
-                #save("files/$filename.jld2", "Evaluation_metrics", evaluation_metric, "Training_params", training_param[i],"Additional_params", additional_param, "Model", model)   # Save the current network and its parameters 
-            end
+        Stopped = ["$(stopped)"],
+        Batchsize = ["$(training_param[i].batchsize)"],
+       DN1 = ["$(training_param[i].domain_neur_1)"],
+       DN2 = ["$(training_param[i].domain_neur_2)"],
+       PN1 = ["$(training_param[i].path_neur_1)"],
+       PN2 = ["$(training_param[i].path_neur_2)"],
+       QN1 = ["$(training_param[i].query_neur_1)"],
+       QN2 = ["$(training_param[i].query_neur_2)"],
+       DQP = ["$(training_param[i].path_query_neur)"],
+       Learning_rate = ["$(training_param[i].learning_rate)"],
+       Treshold =["$(training_param[i].treshold)"],
+       Precision = ["$(evaluation_metric.precision)"],
+       Recall = ["$(evaluation_metric.recall)"],
+       F_score = ["$(evaluation_metric.F_score)"],
+       Mathews = ["$(evaluation_metric.Mathew)"],
+       TP = ["$(evaluation_metric.true_pos)"],
+       FP = ["$(evaluation_metric.false_pos)"],
+       FN = ["$(evaluation_metric.false_neg)"],
+       TN =["$(evaluation_metric.true_neg)"])
 
-        finally
-            unlock(file_lock)
+        if evaluation_metric.Mathew >= 0.8
+            # Save model
+            filename = "$(training_param[i].epochs)_$(training_param[i].batchsize)_$(training_param[i].learning_rate)_$(training_param[i].domain_neur_1)_$(training_param[i].domain_neur_2)_$(training_param[i].path_neur_1)_$(training_param[i].path_neur_2)_$(training_param[i].query_neur_1)_$(training_param[i].query_neur_2)_$(training_param[i].path_query_neur)"   # Construct filename
+            println("Good model")
+            #save("files/$filename.jld2", "Evaluation_metrics", evaluation_metric, "Training_params", training_param[i],"Additional_params", additional_param, "Model", model)   # Save the current network and its parameters                  
         end
-        # Append the current row to the csv file
-        #CSV.write("results.csv", data, append= true)
+        put!(channel, data) # Put the data into a channel
     end
+    @sync close(channel)
+
     return nothing
 end
+
 
 # Custom structure for powers of two
 struct POT{T<:Int} <: AbstractVector{Int}
@@ -427,13 +422,29 @@ function par_grid(X::Vector{Vector{Float64}})::Vector{Vector{Float64}}
     return unique([collect(t) for t in prod])
 end
 
+# Filter grid to only include combinations of parameters that are valid
+function filter_grid(X::Vector{Vector{Float64}})::Vector{Vector{Float64}}
+    Y = Vector{Vector{Float64}}()
+    for vec in X
+        if isequal(vec[3], vec[5]) && isequal(vec[3], vec[7]) && isequal(vec[5], vec[7]) 
+            if !isequal(vec[3], vec[4]) && !isequal(vec[5], vec[6]) && !isequal(vec[7], vec[8])
+                if vec[8]*3 > vec[9]
+                    push!(Y, vec)           
+                else
+                    continue
+                end
+            else
+                continue
+            end
+        else
+            continue
+        end
+    end
+    return Y
+end
+
 # epochs, batchsize, domain_neur_1, domain_neur_2, path_neur_1, path_neur_2, query_neur_1, query_neur_2, path_query_neur, learning_rate
-#ranges = [[40],  ct(POT(64,256)), ct(POT(1024,1024)), ct(POT(256,512)), ct(POT(1024,1024)),  ct(POT(256,512)) , ct(POT(1024,1024)), ct(POT(256,512)), ct(POT(512,1024)), [0.001, 0.005]]
+#ranges = [[15],  ct(POT(32,512)), ct(POT(1024,2048)), ct(POT(512,1024)), ct(POT(1024,2048)),  ct(POT(512,1024)), ct(POT(1024,2048)), ct(POT(512,1024)), ct(POT(1024,2048)), [0.001,0.005, 0.01]]
 
-#ranges = [[20],  ct(POT(32,128)), ct(POT(512,1024)), ct(POT(64,128)), ct(POT(512,1024)),  ct(POT(64,128)), ct(POT(512,1024)), ct(POT(64,128)), ct(POT(256,256)), [0.001]]
-ranges = [[15],  ct(POT(64,64)), ct(POT(1024,1024)), ct(POT(512,512)), ct(POT(1024,1024)),  ct(POT(512,512)), ct(POT(1024,1024)), ct(POT(512,512)), ct(POT(512,512)), [0.001, 0.002]]
-
-#println(size(par_grid(ranges)))
-
-main(ranges, 25000)
-
+ranges = [[15], ct(POT(8,256)), ct(POT(1024,2048)), ct(POT(512,1024)), ct(POT(1024,2048)),  ct(POT(512,1024)), ct(POT(1024,2048)), ct(POT(512,1024)), ct(POT(1024,2048)), [0.0005],[0.5,0.9]]
+main(ranges, 250000)

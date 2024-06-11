@@ -7,4 +7,5 @@
 /Grid_search.jl
 /Unprocessed_url_files
 /Processed_url_files
-
+/gpu.jl
+custom_ngram.jl
