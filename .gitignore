@@ -9,3 +9,8 @@
 /Processed_url_files
 /gpu.jl
 custom_ngram.jl
+gather_results.jl
+par_grid_search.jl
+URL_as_Product_node.jl
+URLs_nodom_par.jl
+URLS_nodomain.jl

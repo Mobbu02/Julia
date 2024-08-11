@@ -1,10 +1,8 @@
 using Revise
-using Mill, HTTP, JLD2, Random, OneHotArrays, Flux, IterTools, DataFrames, CSV, SparseArrays, Plots, Statistics, Profile
+using Mill, HTTP, JLD2, Random, OneHotArrays, Flux, IterTools, DataFrames, CSV, SparseArrays, Plots, Statistics, Profile, Plots
 
 
 function main(ranges::Vector{Vector{Float64}}, amount_of_urls_to_use::Int64, percentage_of_data::Float64=0.6, prime::Int64=2053, ngrams::Int64=3, base::Int64=256)::Nothing
-
-
     # Generate random number every time
     random_seed = rand(UInt32)
     #println("Seed: ", random_seed)
@@ -17,24 +15,28 @@ function main(ranges::Vector{Vector{Float64}}, amount_of_urls_to_use::Int64, per
     all_urls = JLD2.load("final_mix_urls.jld2", "all_urls")[new_indexing]    #  Load URL addresses
     all_labels = JLD2.load("final_mix_labels.jld2", "all_labels")[new_indexing]    # Load labels for URLs
 
-    # Create the training data and the evaluation data 
-    training_lines = all_urls[new_indexing[1:amount_of_training_data]]      # Choose training lines
-    training_labels = all_labels[new_indexing[1:amount_of_training_data]]     # Choose training labels
+    # Training data
+    training_subset = new_indexing[1:amount_of_training_data]
+    training_lines = all_urls[training_subset]      # Choose training lines
+    training_labels = all_labels[training_subset]     # Choose training labels
     
+    # Evaluation data
+    eval_subset = new_indexing[amount_of_training_data+1:split_indx]
+    eval_lines = all_urls[eval_subset]      # Choose eval lines
+    eval_labels = all_labels[eval_subset]     # Choose eval labels
 
-    eval_lines = all_urls[new_indexing[amount_of_training_data+1:split_indx]]      # Choose eval lines
-    eval_labels = all_labels[new_indexing[amount_of_training_data+1:split_indx]]     # Choose eval labels
+    # Check for "goodness" of the model
+    length_of_eval = length(eval_labels)
+    mal = sum(eval_labels.==1)/length_of_eval
+    println("Percentage of malicious URLs within eval data: ", mal)
 
-    valid_lines = all_urls[new_indexing[split_indx+1:end]]      # Choose valid lines
-    valid_labels = all_labels[new_indexing[split_indx+1:end]]     # Choose valid labels
 
-    # Info about data
-    # println("Number of positive training instances: ", sum(training_labels))
-    # println("Nubmer of negative training instances: ", length(training_labels) - sum(training_labels))
-    # println("Number of positive eval instances: ", sum(eval_labels))
-    # println("Number of negative eval instances: ", length(eval_labels) - sum(eval_labels))
+    # Validation data
+    validation_subset = new_indexing[split_indx+1:end]
+    valid_lines = all_urls[validation_subset]      # Choose valid lines
+    valid_labels = all_labels[validation_subset]     # Choose valid labels
   
-    # Prepare training and evaluation data
+    # Prepare training and evaluation and validation data
     training_urls = url_to_mill.(training_lines, ngrams, prime, base)
     eval_urls = url_to_mill.(eval_lines, ngrams, prime, base)
     valid_urls = url_to_mill.(valid_lines, ngrams, prime, base)
@@ -66,6 +68,7 @@ mutable struct Training_params{T<:Int64, S<:Float64}
     learning_rate::S
     treshold::S
 end
+
 # Outer constructor
 function Training_params(vec::Vector{Float64})
     if length(vec) != 11
@@ -91,39 +94,31 @@ function url_to_mill(input::String, ngrams::Int64, prime::Int64, base::Int64)::P
     host = url.host
     path = url.path
     query = url.query
-    
-    path = path[2:end] # Remove the first 
 
     # Prepare input into functions
     host = String.(split(host,"."))
-    path = filter(!isempty, String.(split(path,"/")))
+    path = filter(!isempty, String.(split(path,"/")[2:end]))
+    path = isempty(path) ? [""] : path
     query = String.(split(query,"&"))
 
     # Construct the structure of the model node
-    node = Mill.ProductNode((transform(host,ngrams, prime, base),
-                             transform(path, ngrams, prime, base), 
-                             transform(query, ngrams, prime, base)
+    node = Mill.ProductNode((transform_url(host,ngrams, prime, base),
+                             transform_url(path, ngrams, prime, base), 
+                             transform_url(query, ngrams, prime, base)
                                 ))
     return node
 end
 
 # Transforms vector string[URL] into a BagNode
-function transform(input::Vector{String}, ngrams::Int64, prime::Int64, base::Int64, sparse = false)::BagNode
-    # Check for empty path
-    if isempty(input)
-        input = [""]
-    end
+function transform_url(input::Vector{String}, ngrams::Int64, prime::Int64, base::Int64, sparse = false)::BagNode
+    # # Check for empty path
+    # if isempty(input)
+    #     input = [""]
+    # end
     matrix = Mill.NGramMatrix(input, ngrams, base, prime)    # Create NGramMatrix from the string
-    matrix = sparse ? SparseMatrixCSC(matrix) : matrix
+    #matrix = sparse ? SparseMatrixCSC(matrix) : matrix
     bn = Mill.BagNode(Mill.ArrayNode(matrix), [1:length(input)])     # NgramMatrix can act as ArrayNode data
     return bn
-end
-
-# Check if the present activation functions can be evaluated from the string - if they even exist
-function check_activation_func(str::String)::Nothing
-    funcs = ["relu", "sigmoid", "tanh", "elu"]
-    in(str, funcs) ? true : error("Incorrect activation function!")
-    return nothing
 end
 
 # Struct for holding evaluation results of a model
@@ -221,21 +216,47 @@ function create_model(param::Training_params, prime::Int64)::ProductModel
     #     Dense(Int(param.path_query_neur/4) => 2)))
 
 
+    # model = ProductModel(tuple(
+    #     BagModel(ArrayModel(Flux.Chain(Dense(prime=>param.domain_neur_1, bias = true, gelu), Dropout(0.3, active=true), Dense(param.domain_neur_1=>param.domain_neur_2, bias = true, gelu), Dropout(0.25, active = true), Dense(param.domain_neur_2=>Int(param.domain_neur_2/2), gelu))),
+    #             AggregationStack(SegmentedMean(Int(param.domain_neur_2/2)), SegmentedLSE(Int(param.domain_neur_2/2))), ),
+
+    #     BagModel(ArrayModel(Flux.Chain(Dense(prime => param.path_neur_1, bias = true, gelu ), Dropout(0.3, active=true), Dense(param.path_neur_1=> param.path_neur_2, bias=true, gelu), Dropout(0.25, active = true), Dense(param.path_neur_2=>Int(param.path_neur_2/2), gelu) ) ),  #
+    #             AggregationStack(SegmentedMean(Int(param.path_neur_2/2)), SegmentedLSE(Int(param.path_neur_2/2))), ),
+
+    #     BagModel(ArrayModel(Flux.Chain(Dense(prime => param.query_neur_1, bias = true, gelu), Dropout(0.3, active=true), Dense(param.query_neur_1=> param.query_neur_2, bias=true, gelu), Dropout(0.25, active = true), Dense(param.query_neur_2=>Int(param.query_neur_2/2), gelu))),
+    #             AggregationStack(SegmentedMean(Int(param.query_neur_2/2)), SegmentedLSE(Int(param.query_neur_2/2))), )
+
+    # ), Flux.Chain(Dense((param.domain_neur_2 + param.path_neur_2 + param.query_neur_2) => param.path_query_neur, bias = true, x-> elu(x,2)),
+    #     Dropout(0.2, active=true) ,
+    #     Dense(param.path_query_neur=>Int(param.path_query_neur/2),bias=true, x-> elu(x,2)),
+    #     Dropout(0.2, active=true),
+    #     Dense(Int(param.path_query_neur/2)=>Int(param.path_query_neur/4), bias = true, x-> elu(x,2)),
+    #     Dense(Int(param.path_query_neur/4)=> 2, x->elu(x,2))))
+
+
     mod = ProductModel(tuple(
-        BagModel(ArrayModel(Flux.Chain( Dense(prime=>prime, gelu), Dropout(0.8), Dense(prime=>param.domain_neur_1), BatchNorm(param.domain_neur_1), x->gelu(x), Dense(param.domain_neur_1=>param.domain_neur_2, gelu), BatchNorm(param.domain_neur_2))),
-            AggregationStack(SegmentedMean(param.domain_neur_2), SegmentedLSE(param.domain_neur_2))),
+        BagModel(ArrayModel(Flux.Chain(Dense(prime=>param.domain_neur_1, bias = true, gelu), Dropout(0.3, active=true), Dense(param.domain_neur_1=>param.domain_neur_2, bias = true, gelu), Dropout(0.25, active = true), Dense(param.domain_neur_2=>Int(param.domain_neur_2/2), gelu))),
+                AggregationStack(SegmentedMean(Int(param.domain_neur_2/2)), SegmentedLSE(Int(param.domain_neur_2/2))), ),
 
-        BagModel(ArrayModel(Flux.Chain( Dense(prime=>prime, gelu), Dropout(0.8), Dense(prime=>param.path_neur_1), BatchNorm(param.path_neur_1), x->gelu(x), Dense(param.path_neur_1=>param.path_neur_2, gelu), BatchNorm(param.path_neur_2))),
-            AggregationStack(SegmentedMean(param.path_neur_2), SegmentedLSE(param.path_neur_2))),
+        BagModel(ArrayModel(Flux.Chain(Dense(prime => param.path_neur_1, bias = true, gelu ), Dropout(0.3, active=true), Dense(param.path_neur_1=> param.path_neur_2, bias=true, gelu), Dropout(0.25, active = true), Dense(param.path_neur_2=>Int(param.path_neur_2/2), gelu) ) ),  #
+                AggregationStack(SegmentedMean(Int(param.path_neur_2/2)), SegmentedLSE(Int(param.path_neur_2/2))), ),
 
-        BagModel(ArrayModel(Flux.Chain( Dense(prime=>prime, gelu), Dropout(0.8), Dense(prime=>param.query_neur_1), BatchNorm(param.query_neur_1), x->gelu(x), Dense(param.query_neur_1=>param.query_neur_2, gelu), BatchNorm(param.query_neur_2))),
-            AggregationStack(SegmentedMean(param.query_neur_2), SegmentedLSE(param.query_neur_2))),
-        ),
-        Flux.Chain(BatchNorm(2*(param.domain_neur_2+param.path_neur_2+param.query_neur_2)), Dense(2*(param.domain_neur_2+param.path_neur_2+param.query_neur_2)=>2*(param.domain_neur_2+param.path_neur_2+param.query_neur_2), gelu), Dropout(0.7),
-        Dense(2*(param.domain_neur_2+param.path_neur_2+param.query_neur_2)=>param.path_query_neur), BatchNorm(param.path_query_neur), x->gelu(x),  Dense(param.path_query_neur=>2, gelu)
-        ))
-        
-    #     )
+        BagModel(ArrayModel(Flux.Chain(Dense(prime => param.query_neur_1, bias = true, gelu), Dropout(0.3, active=true), Dense(param.query_neur_1=> param.query_neur_2, bias=true, gelu), Dropout(0.25, active = true), Dense(param.query_neur_2=>Int(param.query_neur_2/2), gelu))),
+                AggregationStack(SegmentedMean(Int(param.query_neur_2/2)), SegmentedLSE(Int(param.query_neur_2/2))), )
+
+    ), Flux.Chain(Dense((param.domain_neur_2 + param.path_neur_2 + param.query_neur_2) => param.path_query_neur, bias = true, x-> elu(x,2)),
+        Dropout(0.2, active=true) ,
+        Dense(param.path_query_neur=>Int(param.path_query_neur/2),bias=true, x-> elu(x,2)),
+        Dropout(0.2, active=true),
+        Dense(Int(param.path_query_neur/2)=>Int(param.path_query_neur/4), bias = true, x-> elu(x,2)),
+        Dense(Int(param.path_query_neur/4)=> 2, x->elu(x,2))))
+
+    return mod
+
+
+
+    printtree(model)
+
     
 
     #  mod = ProductModel(tuple(
@@ -248,7 +269,7 @@ function create_model(param::Training_params, prime::Int64)::ProductModel
     #             AggregationStack(SegmentedMean(Int(param.path_neur_2/2)), SegmentedLSE(Int(param.path_neur_2/2))), ),
                         
     #     BagModel(ArrayModel(Flux.Chain(Dense(prime=>param.query_neur_1, bias = true, relu), Dropout(0.25, active=true), Dense(param.query_neur_1=>param.query_neur_1, bias = true, relu), 
-    #     Dense(param.query_neur_1=> param.query_neur_2, relu), Dropout(0.25, active = true), Dense(param.query_neur_2=>param.query_neur_2, relu), Dropout(0.25,active=true),Dense(param.query_neur_2=>Int(param.query_neur_2/2), relu))), 
+    #     Dense(param.query_neur_1=> param.query_neur_2, relu), Dropout(0.25, active = true), Dense(param.query_neur_2=>param.quer1024y_neur_2, relu), Dropout(0.25,active=true),Dense(param.query_neur_2=>Int(param.query_neur_2/2), relu))), 
     #             AggregationStack(SegmentedMean(Int(param.query_neur_2/2)), SegmentedLSE(Int(param.query_neur_2/2))), )
 
     # ), Flux.Chain(Dense((param.domain_neur_2 + param.path_neur_2 + param.query_neur_2) => param.path_query_neur, bias = true, x-> elu(x,2)),
@@ -289,37 +310,36 @@ function create_model(param::Training_params, prime::Int64)::ProductModel
 
 
     #printtree(mod)
-    return mod
+    #return model
 end
 
 # Training function
-function train(training_urls::Vector{<:ProductNode}, eval_urls::Vector{<:ProductNode}, valid_urls::Vector{<:ProductNode}, training_labels::Vector{Int64}, valid_labels::Vector{Int64}, eval_labels::Vector{Int64}, param::Training_params{Int64}, prime::Int64)::Tuple 
+function train(training_urls::Vector{<:ProductNode}, eval_urls::Vector{<:ProductNode}, valid_urls::Vector{<:ProductNode}, training_labels::Vector{Int64}, valid_labels::Vector{Int64}, 
+    eval_labels::Vector{Int64}, param::Training_params{Int64}, prime::Int64)::Tuple{Vector{Float32}, ProductModel, Bool} 
 
     # Create model of the network
     model = create_model(param, prime) # What with the activation functions
     
-    # Create a loss
+    # Create a loss function
     loss(x, y) = Flux.Losses.logitbinarycrossentropy(x, OneHotArrays.onehotbatch(y .+ 1, 1:2))  # Onehot inside from training labels
 
-    # Create minibatches
+    # Create dataloaders for training and validation
     training_data_loader = Flux.DataLoader((training_urls, training_labels), batchsize = param.batchsize, shuffle = true, partial = false)
     valid_data_loader = Flux.DataLoader((valid_urls, valid_labels), batchsize = param.batchsize, shuffle = true, partial = false)
 
 
     # Early stopping
     # Stopping  criteria for training loop
-    state = Dict("best_loss" => Inf, "no_improv" => 0, "patience"=> 1)
+    state = Dict("best_loss" => Inf, "no_improv" => 0, "patience"=> 2)
 
     opt = Flux.Optimiser(Adam(param.learning_rate))
     opt_state = Flux.setup(opt, model)
 
-    #println(a)
-
+    println("Learning rate is: ", param.learning_rate)
     # Early stopping callback
     function early_stop_cb()::Bool
         eval_loss = mean(loss(model(batch[1]), batch[2]) for batch in valid_data_loader)
-        println(eval_loss)
-        println(state["no_improv"])
+        println("Validation loss is: ", eval_loss)
         if eval_loss < state["best_loss"]
             state["best_loss"] = eval_loss
             state["no_improv"] = 0
@@ -331,36 +351,59 @@ function train(training_urls::Vector{<:ProductNode}, eval_urls::Vector{<:Product
 
     stopped_at = false  # Early stop signalizer
 
+    #15,true,256,2048,512,2048,512,2048,512,1024,0.001,0.781,0.742,0.76,0.697,6446,1811,2236,29507
     trainmode!(model)
+
+    # Epoch loss
+    epoch_losses = Float32[]
+    numb_epochs = 0
+
+    colors = ["red", "blue"]
+    color_mapping = [colors[label] for label in training_labels.+1]
     # Training loop
     for i in 1:param.epochs
         @info "Epoch number $i."
-        is_finite = true
+        is_finite = true # Used for checking if loss is finite
+
+        plot_data = softmax(model(training_urls))
+        p_classes = scatter(plot_data[1,:], plot_data[2,:], color=color_mapping)
+        display(p_classes)
+
+        # Loss over time
+        epoch_loss = 0
+        batch_count = 0
+
         # Batch work
         for (x_batch, y_batch) in training_data_loader
 
             # Calculate the loss and gradients
             val, grads = Flux.withgradient(model) do m
                 result = m(x_batch)
-                loss(result, y_batch)
+                batch_loss = loss(result, y_batch)
+                epoch_loss +=batch_loss
+                batch_count += 1
+                return batch_loss
             end
-            
-            #push!(losses, val)  # Save losses
 
             # Check for valid loss value
             if !isfinite(val)
                 @warn "Loss is $val." 
                 is_finite = false # Remark the loss
                 break
-    
             end
            
-            #println(sum(model.ms[3].im.m.layers[3].weight))
             # Update the parameters of the model (grads[1] is a nested set of NamedTuples)
             Flux.update!(opt_state, model, grads[1])
+            
         end
-         # Early stopping
-         if early_stop_cb()
+        # Epochs
+        numb_epochs += 1
+        avg_epoch_loss = epoch_loss / batch_count
+        push!(epoch_losses, avg_epoch_loss)
+        
+
+        # Early stopping
+        if early_stop_cb()
             stopped_at = true
             break
         end
@@ -368,10 +411,17 @@ function train(training_urls::Vector{<:ProductNode}, eval_urls::Vector{<:Product
         if !is_finite
             break
         end
+        
     end
-
     testmode!(model) # Turn off dropout
 
+    # Plot loss over epochs
+    println(epoch_losses)
+    println(numb_epochs)
+    pl = plot(epoch_losses, 1:numb_epochs)
+    display(pl)
+
+    # Testing set performance
     println("Permormace on the training set:")
     train_probs = softmax(model(training_urls))[1,1:end]
     training_predicted = cold_treshold(train_probs, param.treshold)
@@ -386,7 +436,7 @@ function train(training_urls::Vector{<:ProductNode}, eval_urls::Vector{<:Product
 end
 
 # Cold treshold for converting a vector of probabilites into predictions
-function cold_treshold(probs::Vector{Float32}, treshold::Float64 = 0.5)
+function cold_treshold(probs::Vector{Float32}, treshold::Float64 = 0.5)::Vector{Int64}
     return map(x-> x <= treshold ? 1 : 0, probs)
 end
 
@@ -439,6 +489,10 @@ function grid_search(training_urls::Vector{<:ProductNode}, eval_urls::Vector{<:P
             roc(probs, eval_labels, filename)   # Calculate the ROC and PR curves and save them into a pdf
             #save("files/$filename.jld2", "Evaluation_metrics", evaluation_metric, "Training_params", training_param[i],"Additional_params", additional_param, "Model", model)   # Save the current network and its parameters 
         end
+    
+        # Save the model with state from jld2 - most robust
+        s = Flux.state(model)
+        jldsave("model.jld2", model_state=s) 
         
         # Create a row in the data frame for the current iteration
         data = DataFrame(Epochs = ["$(training_param[i].epochs)"], 
@@ -463,7 +517,7 @@ function grid_search(training_urls::Vector{<:ProductNode}, eval_urls::Vector{<:P
                        TN =["$(evaluation_metric.true_neg)"])
                        
         # Append the current row to the csv file
-        CSV.write("results.csv", data, append= true)
+        CSV.write("Resresults.csv", data, append= true)
     end
     return nothing
 end
@@ -506,14 +560,15 @@ function filter_grid(X::Vector{Vector{Float64}})::Vector{Vector{Float64}}
 end
 
 # epochs, batchsize, treshold, domain_neur_1, domain_neur_2, path_neur_1, path_neur_2, query_neur_1, query_neur_2, path_query_neur, learning_rate
-#ranges = [[15],  ct(POT(256,256)), ct(POT(512,512)), ct(POT(256,256)), ct(POT(1024,1024)),  ct(POT(512,512)), ct(POT(1024,1024)), ct(POT(512,512)), ct(POT(1024,1024)), [0.001]]
+#ranges = [[15],  ct(POT(256,256)), ct(POT(512,512)), ct(POT(256,256)), ct(POT(1024,1024)),  ct(POT(512,512)), ct(POT(1024,1024)), ct(POT(512,512)), ct(POT(1024,1024)), [0.001], [0.5]]
+
+ranges = [[15],  ct(POT(256,256)), ct(POT(2048,2048)), ct(POT(1024,1024)), ct(POT(2048,2048)),  ct(POT(1024,1024)), ct(POT(2048,2048)), ct(POT(1024,1024)), ct(POT(1024,1024)), [0.0005], [0.5]]
 
 #ranges = [[10],  ct(POT(8,128)), ct(POT(1024,2048)), ct(POT(512,1024)), ct(POT(1024,2048)),  ct(POT(512,1024)), ct(POT(1024,2048)), ct(POT(512,1024)), ct(POT(1024,2048)), [0.001, 0.0005,0.0001]]
-ranges = [[15], ct(POT(128,256)), ct(POT(1024,1024)), ct(POT(512,512)), ct(POT(1024,1024)),  ct(POT(512,512)), ct(POT(1024,1024)), ct(POT(512,512)), ct(POT(1024,1024)), [0.1],[0.5]]
 
 #println(size(filter_grid(par_grid(ranges))))
 
 #15,true,128,1024,512,1024,512,1024,512,1024,0.0005,0.851,0.705,0.77,0.72,6094,1069,2546,30291
 
-main(ranges, 20000)
+main(ranges, 300)
 

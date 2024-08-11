@@ -95,43 +95,33 @@ function url_to_mill(input::String, ngrams::Int64, prime::Int64, base::Int64)::P
     url = HTTP.URI(input) # Create "URL" type
     
     # Create parts of the URL
-    host = url.host
+    #host = url.host
     path = url.path
     query = url.query
-    
-    path = path[2:end] # Remove the first 
 
     # Prepare input into functions
-    host = String.(split(host,"."))
-    path = filter(!isempty, String.(split(path,"/")))
+    #host = String.(split(host,"."))
+    path = filter(!isempty, String.(split(path,"/")[2:end]))
+    path = isempty(path) ? [""] : path
     query = String.(split(query,"&"))
 
     # Construct the structure of the model node
-    node = Mill.ProductNode((transform(host,ngrams, prime, base),
-                             transform(path, ngrams, prime, base), 
-                             transform(query, ngrams, prime, base)
+    node = Mill.ProductNode((#transform_url(host,ngrams, prime, base),
+                             transform_url(path, ngrams, prime, base), 
+                             transform_url(query, ngrams, prime, base)
                                 ))
     return node
 end
 
 # Transforms vector string[URL] into a BagNode
-function transform(input::Vector{String}, ngrams::Int64, prime::Int64, base::Int64, sparse = false)::BagNode
-    # Check for empty path
-    if isempty(input)
-        input = [""]
-    end
+function transform_url(input::Vector{String}, ngrams::Int64, prime::Int64, base::Int64, sparse = false)::BagNode
+
     matrix = Mill.NGramMatrix(input, ngrams, base, prime)    # Create NGramMatrix from the string
-    matrix = sparse ? SparseMatrixCSC(matrix) : matrix
+    #matrix = sparse ? SparseMatrixCSC(matrix) : matrix
     bn = Mill.BagNode(Mill.ArrayNode(matrix), [1:length(input)])     # NgramMatrix can act as ArrayNode data
     return bn
 end
 
-# Check if the present activation functions can be evaluated from the string - if they even exist
-function check_activation_func(str::String)::Nothing
-    funcs = ["relu", "sigmoid", "tanh", "elu"]
-    in(str, funcs) ? true : error("Incorrect activation function!")
-    return nothing
-end
 
 # Struct for holding evaluation results of a model
 @everywhere struct Evaluation{T<:Int64, S<:Float64}
@@ -206,17 +196,17 @@ end
 @everywhere function create_model(param::Training_params, prime::Int64)::ProductModel                          
 
     mod = ProductModel(tuple(
-        BagModel(ArrayModel(Flux.Chain( Dense(prime=>prime, gelu), Dropout(0.6), Dense(prime=>param.domain_neur_1), BatchNorm(param.domain_neur_1), x->gelu(x), Dense(param.domain_neur_1=>param.domain_neur_2, gelu), BatchNorm(param.domain_neur_2))),
-            AggregationStack(SegmentedMean(param.domain_neur_2), SegmentedSum(param.domain_neur_2))),
+        #BagModel(ArrayModel(Flux.Chain( Dense(prime=>prime, gelu), Dropout(0.6), Dense(prime=>param.domain_neur_1), BatchNorm(param.domain_neur_1), x->gelu(x), Dense(param.domain_neur_1=>param.domain_neur_2, gelu), BatchNorm(param.domain_neur_2))),
+         #   AggregationStack(SegmentedMean(param.domain_neur_2), SegmentedSum(param.domain_neur_2))),
 
-        BagModel(ArrayModel(Flux.Chain( Dense(prime=>prime, gelu), Dropout(0.6), Dense(prime=>param.path_neur_1), BatchNorm(param.path_neur_1), x->gelu(x), Dense(param.path_neur_1=>param.path_neur_2, gelu), BatchNorm(param.path_neur_2))),
-            AggregationStack(SegmentedMean(param.path_neur_2), SegmentedSum(param.path_neur_2))),
+        BagModel(ArrayModel(Flux.Chain( Dense(prime=>prime, gelu), Dropout(0.5), Dense(prime=>param.path_neur_1), BatchNorm(param.path_neur_1), x->gelu(x), Dense(param.path_neur_1=>param.path_neur_2, gelu), BatchNorm(param.path_neur_2))),
+            AggregationStack(SegmentedMean(param.path_neur_2), SegmentedMax(param.path_neur_2))),
 
-        BagModel(ArrayModel(Flux.Chain( Dense(prime=>prime, gelu), Dropout(0.6), Dense(prime=>param.query_neur_1), BatchNorm(param.query_neur_1), x->gelu(x), Dense(param.query_neur_1=>param.query_neur_2, gelu), BatchNorm(param.query_neur_2))),
-            AggregationStack(SegmentedMean(param.query_neur_2), SegmentedSum(param.query_neur_2))),
+        BagModel(ArrayModel(Flux.Chain( Dense(prime=>prime, gelu), Dropout(0.5), Dense(prime=>param.query_neur_1), BatchNorm(param.query_neur_1), x->gelu(x), Dense(param.query_neur_1=>param.query_neur_2, gelu), BatchNorm(param.query_neur_2))),
+            AggregationStack(SegmentedMean(param.query_neur_2), SegmentedMax(param.query_neur_2))),
             
         ),
-        Flux.Chain(BatchNorm(2*(param.domain_neur_2+param.path_neur_2+param.query_neur_2)), Dense(2*(param.domain_neur_2+param.path_neur_2+param.query_neur_2)=>2*(param.domain_neur_2+param.path_neur_2+param.query_neur_2), gelu), Dropout(0.45),
+        Flux.Chain(BatchNorm(2*(param.path_neur_2+param.query_neur_2)), Dense(2*(param.domain_neur_2+param.path_neur_2+param.query_neur_2)=>2*(param.domain_neur_2+param.path_neur_2+param.query_neur_2), gelu), Dropout(0.45),
         Dense(2*(param.domain_neur_2+param.path_neur_2+param.query_neur_2)=>param.path_query_neur), BatchNorm(param.path_query_neur), x->gelu(x),  Dense(param.path_query_neur=>2, gelu)
         ))
 
@@ -304,11 +294,11 @@ end
 
     testmode!(model) # Turn off dropout
 
-    println("Permormace on the training set:")
-    train_probs = softmax(model(training_urls))[1,1:end]
-    training_predicted = cold_treshold(train_probs, param.treshold)
-    training_metric = evaluate_performance(training_labels, training_predicted)
-    println("----------------")
+    # println("Permormace on the training set:")
+    # train_probs = softmax(model(training_urls))[1,1:end]
+    # training_predicted = cold_treshold(train_probs, param.treshold)
+    # training_metric = evaluate_performance(training_labels, training_predicted)
+    # println("----------------")
 
     #println(softmax(model(eval_urls[1:50])))
     probs = softmax(model(eval_urls))[1,1:end]   # Transform output into probabilities
@@ -351,7 +341,7 @@ end
 
 # Append data into a CSV file 
 function append_data_to_csv(data)
-    filename = "results_par_7.csv"
+    filename = "results_par.csv"
     #df = DataFrame(data, column_names)
     if isfile(filename)
         CSV.write(filename, data, append= true)
@@ -399,6 +389,7 @@ end
         end
         put!(channel, data) # Put the data into a channel
     end
+
     @sync close(channel)
 
     return nothing
@@ -446,5 +437,5 @@ end
 # epochs, batchsize, domain_neur_1, domain_neur_2, path_neur_1, path_neur_2, query_neur_1, query_neur_2, path_query_neur, learning_rate
 #ranges = [[15],  ct(POT(32,512)), ct(POT(1024,2048)), ct(POT(512,1024)), ct(POT(1024,2048)),  ct(POT(512,1024)), ct(POT(1024,2048)), ct(POT(512,1024)), ct(POT(1024,2048)), [0.001,0.005, 0.01]]
 
-ranges = [[15], ct(POT(8,256)), ct(POT(1024,2048)), ct(POT(512,1024)), ct(POT(1024,2048)),  ct(POT(512,1024)), ct(POT(1024,2048)), ct(POT(512,1024)), ct(POT(1024,2048)), [0.0005],[0.5,0.9]]
+ranges = [[15], ct(POT(8,256)), ct(POT(1024,2048)), ct(POT(512,1024)), ct(POT(1024,2048)),  ct(POT(512,1024)), ct(POT(1024,2048)), ct(POT(512,1024)), ct(POT(1024,2048)), [0.001],[0.5,0.9]]
 main(ranges, 250000)
